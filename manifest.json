@@ -1,0 +1,10 @@
+{
+  "buildTime": 1776359700436,
+  "projects": [
+    {
+      "id": "daily-tasks",
+      "name": "Daily Tasks",
+      "file": "Projects/Daily Tasks.txt"
+    }
+  ]
+}

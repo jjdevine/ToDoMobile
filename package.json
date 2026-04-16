@@ -1,0 +1,7 @@
+{
+  "name": "task-planner",
+  "private": true,
+  "scripts": {
+    "build": "node build.js"
+  }
+}
