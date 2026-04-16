@@ -60,6 +60,7 @@
   let currentProjectId = null;
   let selectedDate = todayKey();
   let deferTaskId = null;
+  let editTaskId = null;
 
   let manifest = { buildTime: Date.now(), projects: [] };
   let projectConfigs = {};
@@ -1048,8 +1049,26 @@
         openDeferModal(task.id);
       });
 
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "task-btn edit";
+      editButton.textContent = "Edit";
+      editButton.addEventListener("click", () => {
+        openEditModal(task.id);
+      });
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "task-btn delete";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => {
+        hardDeleteTask(task.id);
+      });
+
       actions.appendChild(completeButton);
       actions.appendChild(deferButton);
+      actions.appendChild(editButton);
+      actions.appendChild(deleteButton);
     }
 
     card.appendChild(actions);
@@ -1230,6 +1249,11 @@
     showScreen("archive");
   }
 
+  function getActiveTask(taskId) {
+    if (!currentProjectId) return null;
+    return getProjectState(currentProjectId).tasks[taskId] || null;
+  }
+
   function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
     if (!currentProjectId) return;
 
@@ -1293,6 +1317,58 @@
     renderCurrentScreen();
   }
 
+  function openEditModal(taskId) {
+    const task = getActiveTask(taskId);
+    if (!task) return;
+
+    editTaskId = taskId;
+    configureTaskDateInput("edit-task-date-input");
+    $("#edit-task-name-input").value = task.name || "";
+    $("#edit-task-description-input").value = task.description || "";
+    $("#edit-task-date-input").value = task.dueDate || "";
+    $("#edit-modal").classList.remove("hidden");
+    $("#edit-modal").setAttribute("aria-hidden", "false");
+  }
+
+  function closeEditModal() {
+    editTaskId = null;
+    $("#edit-modal").classList.add("hidden");
+    $("#edit-modal").setAttribute("aria-hidden", "true");
+  }
+
+  function saveEditedTask(event) {
+    event.preventDefault();
+    if (!currentProjectId || !editTaskId) return;
+
+    const projectState = ensureProjectState(currentProjectId, "");
+    const task = projectState.tasks[editTaskId];
+    if (!task) {
+      closeEditModal();
+      return;
+    }
+
+    const name = $("#edit-task-name-input").value.trim();
+    const description = $("#edit-task-description-input").value.trim();
+    const dueDateValue = $("#edit-task-date-input").value;
+    const dueDate = isDateKey(dueDateValue) ? dueDateValue : null;
+    if (!name) return;
+
+    const timestamp = nowIso();
+    task.name = name;
+    task.description = description;
+    task.dueDate = dueDate;
+    task.updatedAt = timestamp;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+
+    if (dueDate && compareDateKeys(dueDate, todayKey()) >= 0 && compareDateKeys(dueDate, addDays(todayKey(), 6)) <= 0) {
+      selectedDate = dueDate;
+    }
+
+    closeEditModal();
+    renderCurrentScreen();
+  }
+
   function populateDeferSelect() {
     const select = $("#defer-date-select");
     select.innerHTML = "";
@@ -1343,6 +1419,22 @@
     selectedDate = nextDate;
     closeDeferModal();
     renderDayView();
+  }
+
+  function hardDeleteTask(taskId) {
+    if (!currentProjectId) return;
+    const projectState = ensureProjectState(currentProjectId, "");
+    const task = projectState.tasks[taskId];
+    if (!task) return;
+
+    if (!confirm('Delete "' + task.name + '" permanently? This will not move it to the archive.')) return;
+
+    const timestamp = nowIso();
+    delete projectState.tasks[taskId];
+    projectState.deletedTaskIds[taskId] = timestamp;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
   }
 
   function deleteArchivedTask(taskId) {
@@ -1541,9 +1633,16 @@
     });
     $("#cancel-defer-btn").addEventListener("click", closeDeferModal);
     $("#confirm-defer-btn").addEventListener("click", confirmDeferTask);
+    $("#cancel-edit-btn").addEventListener("click", closeEditModal);
+    $("#edit-task-form").addEventListener("submit", saveEditedTask);
     $("#defer-modal").addEventListener("click", (event) => {
       if (event.target === $("#defer-modal")) {
         closeDeferModal();
+      }
+    });
+    $("#edit-modal").addEventListener("click", (event) => {
+      if (event.target === $("#edit-modal")) {
+        closeEditModal();
       }
     });
 
