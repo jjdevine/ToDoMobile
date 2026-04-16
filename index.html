@@ -150,6 +150,21 @@
     </div>
   </div>
 
+  <div id="edit-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Edit Task</h3>
+      <form id="edit-task-form" class="task-form">
+        <input type="text" id="edit-task-name-input" placeholder="Task name" required maxlength="120">
+        <textarea id="edit-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
+        <input type="date" id="edit-task-date-input">
+        <div class="modal-actions">
+          <button id="cancel-edit-btn" type="button" class="btn-secondary">Cancel</button>
+          <button id="save-edit-btn" type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="app.js"></script>

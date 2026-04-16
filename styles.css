@@ -485,6 +485,11 @@ select {
   color: var(--orange);
 }
 
+.task-btn.edit:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .task-btn.delete:hover {
   border-color: var(--red);
   color: var(--red);
