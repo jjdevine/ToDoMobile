@@ -813,6 +813,7 @@
     $("#auth-screen").classList.toggle("active", name === "auth");
     $("#home-screen").classList.toggle("active", name === "home");
     $("#project-screen").classList.toggle("active", name === "project");
+    $("#day-screen").classList.toggle("active", name === "day");
     $("#archive-screen").classList.toggle("active", name === "archive");
   }
 
@@ -892,9 +893,13 @@
     });
   }
 
-  function configureTaskDateInput() {
-    const input = $("#task-date-input");
+  function configureTaskDateInput(inputId, defaultDate) {
+    const input = $("#" + inputId);
+    if (!input) return;
     input.min = todayKey();
+    if (defaultDate && !input.value) {
+      input.value = defaultDate;
+    }
   }
 
   function renderDayStrip(projectId) {
@@ -910,8 +915,7 @@
       if (dateKey === today) card.classList.add("today");
       if (dateKey === selectedDate) card.classList.add("selected");
       card.addEventListener("click", () => {
-        selectedDate = dateKey;
-        renderProject();
+        openDay(dateKey);
       });
 
       const title = document.createElement("div");
@@ -963,8 +967,13 @@
       card.appendChild(value);
       summary.appendChild(card);
     });
+  }
 
-    $("#view-archive-btn").textContent = "View archive (" + stats.archived + ")";
+  function updateArchiveButtonLabel() {
+    const button = $("#view-archive-btn");
+    if (!button || !currentProjectId) return;
+    const stats = buildProjectStats(currentProjectId);
+    button.textContent = "View archive (" + stats.archived + ")";
   }
 
   function buildTaskMeta(task, archived) {
@@ -1135,13 +1144,32 @@
     ensureProjectState(project.id, project.name);
 
     $("#project-title").textContent = project.name;
-    $("#project-subtitle").textContent = "Selected day: " + formatDateLong(selectedDate);
+    $("#project-subtitle").textContent = "Select a day to view its tasks.";
 
-    configureTaskDateInput();
+    configureTaskDateInput("project-task-date-input");
     renderDayStrip(project.id);
     renderSummary(project.id);
-    renderTaskSections(project.id);
     showScreen("project");
+  }
+
+  function renderDayView() {
+    if (!currentProjectId) return;
+
+    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    if (!project) {
+      renderHome();
+      showScreen("home");
+      return;
+    }
+
+    const stats = getDayStats(project.id, selectedDate);
+    $("#day-title").textContent = formatDateLong(selectedDate);
+    $("#day-subtitle").textContent = project.name + " · " + stats.incomplete + " incomplete · " + stats.complete + " complete";
+
+    configureTaskDateInput("day-task-date-input", selectedDate);
+    updateArchiveButtonLabel();
+    renderTaskSections(project.id);
+    showScreen("day");
   }
 
   function renderArchiveScreen() {
@@ -1173,6 +1201,11 @@
       return;
     }
 
+    if ($("#day-screen").classList.contains("active")) {
+      renderDayView();
+      return;
+    }
+
     if ($("#project-screen").classList.contains("active")) {
       renderProject();
       return;
@@ -1187,19 +1220,23 @@
     renderProject();
   }
 
+  function openDay(dateKey) {
+    selectedDate = dateKey;
+    renderDayView();
+  }
+
   function openArchive() {
     renderArchiveScreen();
     showScreen("archive");
   }
 
-  function addManualTask(event) {
-    event.preventDefault();
+  function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
     if (!currentProjectId) return;
 
     const projectState = ensureProjectState(currentProjectId, "");
-    const nameInput = $("#task-name-input");
-    const descriptionInput = $("#task-description-input");
-    const dateInput = $("#task-date-input");
+    const nameInput = $("#" + nameInputId);
+    const descriptionInput = $("#" + descriptionInputId);
+    const dateInput = $("#" + dateInputId);
     const name = nameInput.value.trim();
     const description = descriptionInput.value.trim();
 
@@ -1232,7 +1269,7 @@
       selectedDate = dueDate;
     }
 
-    renderProject();
+    renderCurrentScreen();
   }
 
   function completeTask(taskId) {
@@ -1253,7 +1290,7 @@
     };
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
-    renderProject();
+    renderCurrentScreen();
   }
 
   function populateDeferSelect() {
@@ -1305,7 +1342,7 @@
     schedulePersist("Saving changes...");
     selectedDate = nextDate;
     closeDeferModal();
-    renderProject();
+    renderDayView();
   }
 
   function deleteArchivedTask(taskId) {
@@ -1406,7 +1443,7 @@
     } else {
       setSyncStatus("No new tasks were needed.");
     }
-    renderProject();
+    renderCurrentScreen();
   }
 
   function refreshAllProjects() {
@@ -1482,15 +1519,26 @@
       renderHome();
       showScreen("home");
     });
+    $("#back-project-from-day-btn").addEventListener("click", () => {
+      renderProject();
+    });
     $("#refresh-project-btn").addEventListener("click", refreshCurrentProject);
+    $("#refresh-day-project-btn").addEventListener("click", refreshCurrentProject);
     $("#download-active-btn").addEventListener("click", downloadActiveTasks);
     $("#view-archive-btn").addEventListener("click", openArchive);
     $("#back-project-btn").addEventListener("click", () => {
-      renderProject();
+      renderDayView();
     });
     $("#download-archive-btn").addEventListener("click", downloadArchiveTasks);
     $("#delete-archive-btn").addEventListener("click", clearArchive);
-    $("#add-task-form").addEventListener("submit", addManualTask);
+    $("#project-add-task-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      addManualTaskFromForm("project-task-name-input", "project-task-description-input", "project-task-date-input");
+    });
+    $("#day-add-task-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      addManualTaskFromForm("day-task-name-input", "day-task-description-input", "day-task-date-input");
+    });
     $("#cancel-defer-btn").addEventListener("click", closeDeferModal);
     $("#confirm-defer-btn").addEventListener("click", confirmDeferTask);
     $("#defer-modal").addEventListener("click", (event) => {

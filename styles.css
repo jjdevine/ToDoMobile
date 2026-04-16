@@ -307,6 +307,14 @@ select {
   gap: 0.6rem;
 }
 
+#project-screen .day-strip {
+  grid-template-columns: 1fr;
+}
+
+#project-screen .day-card {
+  text-align: left;
+}
+
 .day-card {
   padding: 0.8rem;
   cursor: pointer;

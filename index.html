@@ -61,34 +61,61 @@
 
       <div class="project-actions">
         <button id="refresh-project-btn" class="btn-primary">Refresh tasks</button>
-        <button id="download-active-btn" class="btn-secondary">Download active</button>
-        <button id="view-archive-btn" class="btn-secondary">View archive</button>
       </div>
-
-      <section class="panel add-task-panel">
-        <div class="panel-heading">
-          <h3>Add Task</h3>
-          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
-        </div>
-        <form id="add-task-form" class="task-form">
-          <input type="text" id="task-name-input" placeholder="Task name" required maxlength="120">
-          <textarea id="task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
-          <input type="date" id="task-date-input">
-          <button type="submit" class="btn-primary">Add task</button>
-        </form>
-      </section>
 
       <section class="panel">
         <div class="panel-heading">
           <h3>Next 7 Days</h3>
-          <p class="subtitle">Today is highlighted. Choose a day to focus the main list.</p>
+          <p class="subtitle">Today is highlighted. Select a day to open its task list.</p>
         </div>
         <div id="day-strip" class="day-strip"></div>
       </section>
 
       <div id="project-summary" class="summary-grid"></div>
 
+      <section class="panel add-task-panel">
+        <div class="panel-heading">
+          <h3>Add Task</h3>
+          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
+        </div>
+        <form id="project-add-task-form" class="task-form">
+          <input type="text" id="project-task-name-input" placeholder="Task name" required maxlength="120">
+          <textarea id="project-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
+          <input type="date" id="project-task-date-input">
+          <button type="submit" class="btn-primary">Add task</button>
+        </form>
+      </section>
+    </div>
+
+    <div id="day-screen" class="screen">
+      <header class="deck-header">
+        <button id="back-project-from-day-btn" class="btn-back" aria-label="Back to project">&larr;</button>
+        <div class="deck-header-text">
+          <h2 id="day-title"></h2>
+          <p id="day-subtitle" class="subtitle"></p>
+        </div>
+      </header>
+
+      <div class="project-actions">
+        <button id="refresh-day-project-btn" class="btn-primary">Refresh tasks</button>
+        <button id="download-active-btn" class="btn-secondary">Download active</button>
+        <button id="view-archive-btn" class="btn-secondary">View archive</button>
+      </div>
+
       <div id="task-sections" class="task-sections"></div>
+
+      <section class="panel add-task-panel">
+        <div class="panel-heading">
+          <h3>Add Task</h3>
+          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
+        </div>
+        <form id="day-add-task-form" class="task-form">
+          <input type="text" id="day-task-name-input" placeholder="Task name" required maxlength="120">
+          <textarea id="day-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
+          <input type="date" id="day-task-date-input">
+          <button type="submit" class="btn-primary">Add task</button>
+        </form>
+      </section>
     </div>
 
     <div id="archive-screen" class="screen">
