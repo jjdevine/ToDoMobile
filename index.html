@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Planner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="auth-screen" class="screen active">
+      <header class="app-header">
+        <h1>Task Planner</h1>
+        <p class="subtitle">Recurring projects, daily focus, and offline-friendly sync</p>
+      </header>
+      <div class="auth-container">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Sign In</button>
+          <button class="auth-tab" data-tab="signup">Sign Up</button>
+        </div>
+        <form id="auth-form" class="auth-form">
+          <input type="email" id="auth-email" placeholder="Email" required autocomplete="email">
+          <input type="password" id="auth-password" placeholder="Password" required autocomplete="current-password" minlength="6">
+          <button type="submit" id="auth-submit-btn" class="btn-primary auth-submit">Sign In</button>
+          <p id="auth-error" class="auth-error hidden"></p>
+        </form>
+        <button id="skip-auth-btn" class="btn-text auth-skip">Continue without signing in</button>
+      </div>
+    </div>
+
+    <div id="home-screen" class="screen">
+      <header class="app-header">
+        <h1>Task Planner</h1>
+        <p class="subtitle">Projects generated from text files, with manual tasks and archives</p>
+        <div id="user-bar" class="user-bar hidden">
+          <span id="user-email" class="user-email"></span>
+          <button id="sync-now-btn" class="btn-sync" title="Sync now">&#x21BB;</button>
+          <button id="logout-btn" class="btn-text">Sign out</button>
+        </div>
+        <p id="sync-status" class="sync-status">Local-only mode</p>
+      </header>
+
+      <div class="toolbar-row">
+        <button id="generate-all-btn" class="btn-primary">Generate tasks now</button>
+      </div>
+
+      <div id="project-grid" class="project-grid"></div>
+      <div id="home-empty" class="empty-state hidden">
+        No project files were found. Add a `.txt` file to `Projects/` and run `node build.js`.
+      </div>
+    </div>
+
+    <div id="project-screen" class="screen">
+      <header class="deck-header">
+        <button id="back-home-btn" class="btn-back" aria-label="Back to projects">&larr;</button>
+        <div class="deck-header-text">
+          <h2 id="project-title"></h2>
+          <p id="project-subtitle" class="subtitle"></p>
+        </div>
+      </header>
+
+      <div class="project-actions">
+        <button id="refresh-project-btn" class="btn-primary">Refresh tasks</button>
+        <button id="download-active-btn" class="btn-secondary">Download active</button>
+        <button id="view-archive-btn" class="btn-secondary">View archive</button>
+      </div>
+
+      <section class="panel add-task-panel">
+        <div class="panel-heading">
+          <h3>Add Task</h3>
+          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
+        </div>
+        <form id="add-task-form" class="task-form">
+          <input type="text" id="task-name-input" placeholder="Task name" required maxlength="120">
+          <textarea id="task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
+          <input type="date" id="task-date-input">
+          <button type="submit" class="btn-primary">Add task</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>Next 7 Days</h3>
+          <p class="subtitle">Today is highlighted. Choose a day to focus the main list.</p>
+        </div>
+        <div id="day-strip" class="day-strip"></div>
+      </section>
+
+      <div id="project-summary" class="summary-grid"></div>
+
+      <div id="task-sections" class="task-sections"></div>
+    </div>
+
+    <div id="archive-screen" class="screen">
+      <header class="deck-header">
+        <button id="back-project-btn" class="btn-back" aria-label="Back to project">&larr;</button>
+        <div class="deck-header-text">
+          <h2 id="archive-title"></h2>
+          <p class="subtitle">Completed tasks live here until you remove them.</p>
+        </div>
+      </header>
+
+      <div class="project-actions">
+        <button id="download-archive-btn" class="btn-primary">Download archive</button>
+        <button id="delete-archive-btn" class="btn-danger">Delete archive</button>
+      </div>
+
+      <div id="archive-list" class="task-sections"></div>
+      <div id="archive-empty" class="empty-state hidden">No archived tasks yet.</div>
+    </div>
+  </div>
+
+  <div id="defer-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Defer Task</h3>
+      <p id="defer-task-name" class="modal-text"></p>
+      <label class="modal-label" for="defer-date-select">Move to</label>
+      <select id="defer-date-select"></select>
+      <div class="modal-actions">
+        <button id="cancel-defer-btn" type="button" class="btn-secondary">Cancel</button>
+        <button id="confirm-defer-btn" type="button" class="btn-primary">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="supabase-config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch((err) => {
+          console.warn("Service worker registration failed:", err);
+        });
+      });
+
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        window.location.reload();
+      });
+    }
+  </script>
+</body>
+</html>

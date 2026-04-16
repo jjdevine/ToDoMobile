@@ -1,0 +1,61 @@
+#recurring
+work-weekly-saturday,sunday
+weights-weekly-monday,wednesday,friday,sunday
+rowing-weekly-tuesday,thursday,sunday
+physio simple-weekly-monday,wednesday,friday,sunday
+physio complex-weekly-tuesday,saturday
+moisturise-weekly-saturday,sunday
+offline backup pcloud files-monthly-1
+backup last months phone photos-monthly-1
+practice spanish-weekly-saturday,sunday
+practice indonesian-weekly-monday,wednesday,friday,saturday
+practice french-weekly-tuesday,thursday,sunday
+read articles-weekly-tuesday,thursday,sunday
+AI flashcards-weekly-tuesday,thursday,sunday
+save payslip-monthly-1
+save Jasmin remittence-monthly-1
+zopa reg saver transfer-monthly-3
+Lloyds reg saver transfer-monthly-1
+rowing warm up-weekly-saturday
+wrist exercise-weekly-monday,wednesday,friday,sunday
+retinol-weekly-monday,tuesday,wednesday,thursday,friday,saturday,sunday
+5 things-weekly-saturday, sunday
+
+#monday
+soak chickpeas-weekly-monday
+defrost chicken for lunch-weekly-monday
+
+#tuesday
+cook pasta-weekly-tuesday
+clean wingmirrors-weekly-tuesday
+
+#wednesday
+#thursday
+
+change bedding-weekly-thursday
+delay simply cook-weekly-thursday
+check custom domain emails-weekly-thursday
+
+#friday
+
+defrost simply cook food-weekly-friday
+cook quinoa-weekly-friday
+supermarket order-weekly-friday
+fantasy football-weekly-friday
+
+#saturday
+
+weigh in-weekly-saturday
+preply indonesian-weekly-saturday
+defrost chicken x 2 for lunch-weekly-saturday
+laundry-weekly-saturday
+soak chickpeas-weekly-saturday
+
+#sunday
+
+preply french-weekly-sunday
+shave-weekly-sunday
+clean wingmirrors-weekly-sunday
+protein bars-weekly-sunday
+batch cooking-weekly-sunday
+generate next weeks tasks-weekly-sunday
