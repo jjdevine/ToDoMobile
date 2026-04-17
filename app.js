@@ -1122,14 +1122,7 @@
 
     getVisibleDates().forEach((dateKey) => {
       const stats = getDayStats(projectId, dateKey);
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "day-card";
-      if (dateKey === today) card.classList.add("today");
-      if (selectedTaskView === "day" && dateKey === selectedDate) card.classList.add("selected");
-      card.addEventListener("click", () => {
-        openDay(dateKey);
-      });
+      if (!stats.required && dateKey !== today) return;
 
       const title = document.createElement("div");
       title.className = "day-title";
@@ -1141,6 +1134,27 @@
 
       const metrics = document.createElement("div");
       metrics.className = "day-metrics";
+
+      if (!stats.required) {
+        const emptyCard = document.createElement("div");
+        emptyCard.className = "day-card today empty-day-card";
+        metrics.appendChild(document.createTextNode("No tasks due today"));
+        emptyCard.appendChild(title);
+        emptyCard.appendChild(date);
+        emptyCard.appendChild(metrics);
+        dayStrip.appendChild(emptyCard);
+        return;
+      }
+
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "day-card";
+      if (dateKey === today) card.classList.add("today");
+      if (selectedTaskView === "day" && dateKey === selectedDate) card.classList.add("selected");
+      card.addEventListener("click", () => {
+        openDay(dateKey);
+      });
+
       metrics.appendChild(document.createTextNode("Required: " + stats.required));
       metrics.appendChild(document.createElement("br"));
       metrics.appendChild(document.createTextNode("Complete: " + stats.complete));
