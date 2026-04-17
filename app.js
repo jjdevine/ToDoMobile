@@ -970,7 +970,24 @@
       title.className = "project-card-title";
       title.textContent = project.name;
       topRow.appendChild(title);
-      topRow.appendChild(createChip("active", String(stats.active)));
+
+      const topRowActions = document.createElement("div");
+      topRowActions.className = "project-card-top-actions";
+      topRowActions.appendChild(createChip("active", String(stats.active)));
+
+      if (!project.hasConfig) {
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "project-card-delete";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteManualProject(project.id);
+        });
+        topRowActions.appendChild(deleteButton);
+      }
+
+      topRow.appendChild(topRowActions);
 
       const meta = document.createElement("div");
       meta.className = "project-card-meta";
@@ -993,6 +1010,22 @@
       card.appendChild(footer);
       projectGrid.appendChild(card);
     });
+  }
+
+  function deleteManualProject(projectId) {
+    const project = getProjectMeta(projectId);
+    if (!project || project.hasConfig) return;
+
+    if (!confirm('Delete manual project "' + project.name + '" and all its tasks?')) return;
+
+    delete appState.projects[projectId];
+    if (currentProjectId === projectId) {
+      currentProjectId = null;
+    }
+    appState.updatedAt = nowIso();
+    schedulePersist("Saving changes...");
+    renderHome();
+    showScreen("home");
   }
 
   function updateRefreshButtons(project) {
