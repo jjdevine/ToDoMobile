@@ -144,9 +144,33 @@ select {
   gap: 1rem;
 }
 
+.project-card-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .project-card-title {
   font-size: 1.05rem;
   font-weight: 600;
+}
+
+.project-card-delete {
+  border: 1px solid rgba(207, 92, 92, 0.58);
+  border-radius: 999px;
+  background: rgba(92, 33, 33, 0.22);
+  color: #f0c4c4;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.project-card-delete:hover {
+  border-color: var(--red);
+  background: rgba(110, 38, 38, 0.34);
+  color: #ffe3e3;
 }
 
 .project-card-meta,
@@ -454,6 +478,14 @@ select {
   transition: border-color var(--transition), background var(--transition), transform var(--transition);
 }
 
+.empty-day-card {
+  cursor: default;
+}
+
+.empty-day-card:hover {
+  transform: none;
+}
+
 .day-card:hover {
   border-color: var(--accent);
   transform: translateY(-1px);
@@ -468,6 +500,11 @@ select {
 #project-screen .project-task-view-card:hover {
   border-color: rgba(190, 134, 77, 0.72);
   background: linear-gradient(180deg, rgba(92, 57, 30, 0.34), rgba(38, 29, 23, 0.98));
+}
+
+#project-screen .empty-day-card:hover {
+  border-color: var(--yellow);
+  background: linear-gradient(180deg, rgba(102, 83, 32, 0.34), rgba(39, 33, 19, 0.98));
 }
 
 #project-screen .day-card.selected,
