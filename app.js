@@ -1566,15 +1566,32 @@
   }
 
   function openCreateProjectPanel() {
-    $("#create-project-panel").classList.remove("hidden");
-    $("#open-create-project-btn").classList.add("hidden");
-    $("#create-project-name-input").focus();
+    const panel = $("#create-project-panel");
+    const openButton = $("#open-create-project-btn");
+    const input = $("#create-project-name-input");
+    if (!panel.classList.contains("hidden")) return;
+    panel.classList.remove("hidden");
+    openButton.classList.add("hidden");
+    openButton.setAttribute("aria-expanded", "true");
+    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    requestAnimationFrame(() => {
+      try {
+        input.focus({ preventScroll: true });
+      } catch (error) {
+        input.focus();
+      }
+    });
   }
 
   function closeCreateProjectPanel() {
-    $("#create-project-panel").classList.add("hidden");
-    $("#open-create-project-btn").classList.remove("hidden");
-    $("#create-project-name-input").value = "";
+    const panel = $("#create-project-panel");
+    const openButton = $("#open-create-project-btn");
+    const input = $("#create-project-name-input");
+    if (panel.classList.contains("hidden")) return;
+    panel.classList.add("hidden");
+    openButton.classList.remove("hidden");
+    openButton.setAttribute("aria-expanded", "false");
+    input.value = "";
   }
 
   function createManualProject(event) {
@@ -1944,6 +1961,7 @@
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
+    $("#open-create-project-btn").addEventListener("pointerup", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#back-home-btn").addEventListener("click", () => {
       currentProjectId = null;
