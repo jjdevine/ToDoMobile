@@ -1006,10 +1006,12 @@
     return container;
   }
 
-  function buildProjectTaskViewCard(titleText, detailText, descriptionText, onOpen, className) {
+  function buildProjectTaskViewCard(titleText, detailText, descriptionText, onOpen, className, selected) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "day-card project-task-view-card" + (className ? " " + className : "");
+    card.className = "day-card project-task-view-card"
+      + (className ? " " + className : "")
+      + (selected ? " selected" : "");
     card.addEventListener("click", onOpen);
 
     const title = document.createElement("div");
@@ -1054,7 +1056,8 @@
       () => {
         openOverdue();
       },
-      "overdue-entry-card"
+      "overdue-entry-card",
+      selectedTaskView === "overdue"
     ));
 
     container.appendChild(buildProjectTaskViewCard(
@@ -1066,7 +1069,8 @@
       () => {
         openNoDueDate();
       },
-      "nodate-entry-card"
+      "nodate-entry-card",
+      selectedTaskView === "nodate"
     ));
   }
 
@@ -1083,6 +1087,11 @@
     const dayStrip = $("#day-strip");
     dayStrip.innerHTML = "";
     const today = todayKey();
+    const futureTasks = getTaskBuckets(projectId, today).future;
+    const nearestFutureDate = futureTasks
+      .map((task) => task.dueDate)
+      .filter(Boolean)
+      .sort(compareDateKeys)[0];
 
     getVisibleDates().forEach((dateKey) => {
       const stats = getDayStats(projectId, dateKey);
@@ -1090,7 +1099,7 @@
       card.type = "button";
       card.className = "day-card";
       if (dateKey === today) card.classList.add("today");
-      if (dateKey === selectedDate) card.classList.add("selected");
+      if (selectedTaskView === "day" && dateKey === selectedDate) card.classList.add("selected");
       card.addEventListener("click", () => {
         openDay(dateKey);
       });
@@ -1116,6 +1125,37 @@
       card.appendChild(metrics);
       dayStrip.appendChild(card);
     });
+
+    const futureCard = document.createElement("button");
+    futureCard.type = "button";
+    futureCard.className = "day-card";
+    if (selectedTaskView === "future") futureCard.classList.add("selected");
+    futureCard.addEventListener("click", () => {
+      openFutureTasks();
+    });
+
+    const futureTitle = document.createElement("div");
+    futureTitle.className = "day-title";
+    futureTitle.textContent = "Other Future Tasks";
+
+    const futureDate = document.createElement("div");
+    futureDate.className = "day-date";
+    futureDate.textContent = futureTasks.length
+      ? futureTasks.length + " task" + (futureTasks.length === 1 ? "" : "s") + " beyond 7 days"
+      : "No tasks beyond 7 days";
+
+    const futureMetrics = document.createElement("div");
+    futureMetrics.className = "day-metrics";
+    futureMetrics.appendChild(document.createTextNode(
+      nearestFutureDate
+        ? "Next due: " + formatDatePill(nearestFutureDate)
+        : "Open future task list"
+    ));
+
+    futureCard.appendChild(futureTitle);
+    futureCard.appendChild(futureDate);
+    futureCard.appendChild(futureMetrics);
+    dayStrip.appendChild(futureCard);
   }
 
   function renderSummary(projectId) {
@@ -1293,7 +1333,7 @@
     return {
       overdue: tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, today) < 0),
       selected: tasks.filter((task) => task.dueDate === dateKey),
-      later: tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, visibleEnd) > 0),
+      future: tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, visibleEnd) > 0),
       noDate: tasks.filter((task) => !task.dueDate),
     };
   }
@@ -1322,14 +1362,23 @@
       return;
     }
 
+    if (selectedTaskView === "future") {
+      taskSections.appendChild(buildTaskSection("Other Future Tasks", taskBuckets.future, {
+        overdue: false,
+        archived: false,
+        emptyMessage: "No tasks are due beyond the next 7 days.",
+      }));
+      return;
+    }
+
     taskSections.appendChild(buildTaskSection(formatDateLong(selectedDate), taskBuckets.selected, {
       overdue: false,
       archived: false,
       emptyMessage: "No tasks are due on this day.",
     }));
 
-    if (taskBuckets.later.length) {
-      taskSections.appendChild(buildTaskSection("Later", taskBuckets.later, {
+    if (taskBuckets.future.length) {
+      taskSections.appendChild(buildTaskSection("Other Future Tasks", taskBuckets.future, {
         overdue: false,
         archived: false,
       }));
@@ -1379,6 +1428,10 @@
       const noDateCount = getTaskBuckets(project.id, selectedDate).noDate.length;
       $("#day-title").textContent = "No Due Date";
       $("#day-subtitle").textContent = project.name + " · " + noDateCount + " task" + (noDateCount === 1 ? "" : "s") + " with no due date";
+    } else if (selectedTaskView === "future") {
+      const futureCount = getTaskBuckets(project.id, selectedDate).future.length;
+      $("#day-title").textContent = "Other Future Tasks";
+      $("#day-subtitle").textContent = project.name + " · " + futureCount + " task" + (futureCount === 1 ? "" : "s") + " beyond the next 7 days";
     } else {
       const stats = getDayStats(project.id, selectedDate);
       $("#day-title").textContent = formatDateLong(selectedDate);
@@ -1454,6 +1507,11 @@
 
   function openNoDueDate() {
     selectedTaskView = "nodate";
+    renderDayView();
+  }
+
+  function openFutureTasks() {
+    selectedTaskView = "future";
     renderDayView();
   }
 
