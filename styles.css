@@ -416,6 +416,33 @@ select {
   border-color: var(--red) !important;
 }
 
+.overdue-entry-card.has-overdue-tasks {
+  border-color: #e27a7a !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 228, 228, 0.08),
+    0 0 0 1px rgba(226, 122, 122, 0.2),
+    0 0 22px rgba(207, 92, 92, 0.18) !important;
+  animation: overdue-card-glow 2.2s ease-in-out infinite;
+}
+
+.overdue-entry-card.has-overdue-tasks .day-title {
+  color: #fff1f1 !important;
+}
+
+.overdue-entry-card.has-overdue-tasks .day-date,
+.overdue-entry-card.has-overdue-tasks .day-metrics {
+  color: #efc5c5 !important;
+}
+
+.overdue-entry-card.has-overdue-tasks:hover,
+#project-screen .overdue-entry-card.has-overdue-tasks.selected {
+  border-color: #f09a9a !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 236, 0.1),
+    0 0 0 1px rgba(240, 154, 154, 0.26),
+    0 0 28px rgba(207, 92, 92, 0.24) !important;
+}
+
 .nodate-entry-card {
   border-style: dashed;
 }
@@ -454,6 +481,23 @@ select {
   background: linear-gradient(180deg, var(--red-deep-hover), rgba(42, 24, 27, 0.98)) !important;
   border-color: var(--red) !important;
   box-shadow: inset 0 1px 0 rgba(255, 214, 214, 0.06), 0 0 0 1px rgba(177, 84, 84, 0.12) !important;
+}
+
+@keyframes overdue-card-glow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 228, 228, 0.08),
+      0 0 0 1px rgba(226, 122, 122, 0.2),
+      0 0 18px rgba(207, 92, 92, 0.14);
+  }
+
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 236, 236, 0.12),
+      0 0 0 1px rgba(240, 154, 154, 0.28),
+      0 0 30px rgba(207, 92, 92, 0.26);
+  }
 }
 
 #project-screen .day-card.today {
