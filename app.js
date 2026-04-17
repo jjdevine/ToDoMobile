@@ -978,49 +978,68 @@
     });
   }
 
-  function renderOverdueEntry(projectId) {
-    const container = $("#project-overdue-entry");
-    if (!container) return;
-    container.innerHTML = "";
-
-    const overdueTasks = getTaskBuckets(projectId, todayKey()).overdue;
+  function buildProjectTaskViewCard(titleText, detailText, descriptionText, onOpen, className) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "day-card overdue-entry-card";
-    card.addEventListener("click", () => {
-      openOverdue();
-    });
+    card.className = "day-card project-task-view-card" + (className ? " " + className : "");
+    card.addEventListener("click", onOpen);
 
     const title = document.createElement("div");
     title.className = "day-title";
-    title.textContent = "Overdue";
+    title.textContent = titleText;
 
-    const date = document.createElement("div");
-    date.className = "day-date";
-    date.textContent = overdueTasks.length
-      ? overdueTasks.length + " overdue task" + (overdueTasks.length === 1 ? "" : "s")
-      : "No overdue tasks";
+    const detail = document.createElement("div");
+    detail.className = "day-date";
+    detail.textContent = detailText;
 
     const metrics = document.createElement("div");
     metrics.className = "day-metrics";
-    if (overdueTasks.length) {
-      const oldestDueDate = overdueTasks
-        .map((task) => task.dueDate)
-        .filter(Boolean)
-        .sort(compareDateKeys)[0];
-      metrics.appendChild(document.createTextNode("Open overdue task list"));
-      if (oldestDueDate) {
-        metrics.appendChild(document.createElement("br"));
-        metrics.appendChild(document.createTextNode("Oldest due: " + formatDatePill(oldestDueDate)));
-      }
-    } else {
-      metrics.appendChild(document.createTextNode("Open list"));
-    }
+    metrics.appendChild(document.createTextNode(descriptionText));
 
     card.appendChild(title);
-    card.appendChild(date);
+    card.appendChild(detail);
     card.appendChild(metrics);
-    container.appendChild(card);
+    return card;
+  }
+
+  function renderProjectTaskViewCards(projectId) {
+    const container = $("#project-task-view-cards");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const taskBuckets = getTaskBuckets(projectId, todayKey());
+    const overdueTasks = taskBuckets.overdue;
+    const noDateTasks = taskBuckets.noDate;
+    const oldestDueDate = overdueTasks
+      .map((task) => task.dueDate)
+      .filter(Boolean)
+      .sort(compareDateKeys)[0];
+
+    container.appendChild(buildProjectTaskViewCard(
+      "Overdue",
+      overdueTasks.length
+        ? overdueTasks.length + " overdue task" + (overdueTasks.length === 1 ? "" : "s")
+        : "No overdue tasks",
+      oldestDueDate
+        ? "Open overdue task list · Oldest due: " + formatDatePill(oldestDueDate)
+        : "Open overdue task list",
+      () => {
+        openOverdue();
+      },
+      "overdue-entry-card"
+    ));
+
+    container.appendChild(buildProjectTaskViewCard(
+      "No Due Date",
+      noDateTasks.length
+        ? noDateTasks.length + " task" + (noDateTasks.length === 1 ? "" : "s") + " with no due date"
+        : "No tasks without a due date",
+      "Open no due date task list",
+      () => {
+        openNoDueDate();
+      },
+      "nodate-entry-card"
+    ));
   }
 
   function configureTaskDateInput(inputId, defaultDate) {
@@ -1266,6 +1285,15 @@
       return;
     }
 
+    if (selectedTaskView === "nodate") {
+      taskSections.appendChild(buildTaskSection("No Due Date", taskBuckets.noDate, {
+        overdue: false,
+        archived: false,
+        emptyMessage: "No tasks without a due date right now.",
+      }));
+      return;
+    }
+
     taskSections.appendChild(buildTaskSection(formatDateLong(selectedDate), taskBuckets.selected, {
       overdue: false,
       archived: false,
@@ -1274,13 +1302,6 @@
 
     if (taskBuckets.later.length) {
       taskSections.appendChild(buildTaskSection("Later", taskBuckets.later, {
-        overdue: false,
-        archived: false,
-      }));
-    }
-
-    if (taskBuckets.noDate.length) {
-      taskSections.appendChild(buildTaskSection("No Due Date", taskBuckets.noDate, {
         overdue: false,
         archived: false,
       }));
@@ -1305,7 +1326,7 @@
       : "Manual project. Add your own tasks and use the date list to focus each day.";
 
     configureTaskDateInput("project-task-date-input");
-    renderOverdueEntry(project.id);
+    renderProjectTaskViewCards(project.id);
     renderDayStrip(project.id);
     renderSummary(project.id);
     updateRefreshButtons(project);
@@ -1326,6 +1347,10 @@
       const overdueCount = getTaskBuckets(project.id, selectedDate).overdue.length;
       $("#day-title").textContent = "Overdue";
       $("#day-subtitle").textContent = project.name + " · " + overdueCount + " overdue task" + (overdueCount === 1 ? "" : "s");
+    } else if (selectedTaskView === "nodate") {
+      const noDateCount = getTaskBuckets(project.id, selectedDate).noDate.length;
+      $("#day-title").textContent = "No Due Date";
+      $("#day-subtitle").textContent = project.name + " · " + noDateCount + " task" + (noDateCount === 1 ? "" : "s") + " with no due date";
     } else {
       const stats = getDayStats(project.id, selectedDate);
       $("#day-title").textContent = formatDateLong(selectedDate);
@@ -1396,6 +1421,11 @@
 
   function openOverdue() {
     selectedTaskView = "overdue";
+    renderDayView();
+  }
+
+  function openNoDueDate() {
+    selectedTaskView = "nodate";
     renderDayView();
   }
 

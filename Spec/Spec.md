@@ -65,13 +65,14 @@ The project screen contains:
 
 - A refresh button for recurring projects
 - An `Overdue` entry directly below the refresh button
+- A `No Due Date` entry below the `Overdue` entry
 - A `Next 7 Days` list
 - Summary cards for `Active`, `Due Today`, `Overdue`, and `No Due Date`
 - An `Add Task` form
 
 Today is highlighted within the 7-day list.
 
-The `Overdue` entry appears above the `Next 7 Days` list. It opens a dedicated overdue task-list view. Task items themselves are not shown directly on the project screen.
+The `Overdue` and `No Due Date` entries appear above the `Next 7 Days` list. Each opens its own dedicated task-list view. Task items themselves are not shown directly on the project screen.
 
 Selecting one of the day entries opens the task-list view for that specific day.
 
@@ -89,14 +90,16 @@ The task-list screen is used for both:
 
 - A selected day
 - The overdue view
+- The no-due-date view
 
 When a normal day is opened, the task-list screen shows:
 
 - A section for the selected day
 - A `Later` section for tasks due after the current 7-day window, when applicable
-- A `No Due Date` section for undated tasks, when applicable
 
 When the overdue view is opened, the task-list screen shows overdue tasks only.
+
+When the no-due-date view is opened, the task-list screen shows tasks with no due date only.
 
 The task-list screen also provides:
 
@@ -135,7 +138,7 @@ Tasks whose due dates are before today are treated as overdue.
 
 Overdue tasks are accessed from the dedicated `Overdue` entry on the project screen and shown in their own task-list view.
 
-Tasks with no due date are not attached to a specific day. They appear in the `No Due Date` section of the normal day-based task-list screen.
+Tasks with no due date are not attached to a specific day. They are accessed from the dedicated `No Due Date` entry on the project screen and shown in their own task-list view.
 
 ## Archive behavior
 
