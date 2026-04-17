@@ -42,16 +42,20 @@
 
       <div class="toolbar-row">
         <button id="generate-all-btn" class="btn-primary">Generate tasks now</button>
+        <button id="open-create-project-btn" class="btn-secondary">Create project</button>
       </div>
 
-      <section class="panel">
+      <section id="create-project-panel" class="panel create-project-panel hidden">
         <div class="panel-heading">
           <h3>New Project</h3>
           <p class="subtitle">Create a project with your own tasks only, with no matching `.txt` file required.</p>
         </div>
         <form id="create-project-form" class="project-create-form">
           <input type="text" id="create-project-name-input" placeholder="Project name" required maxlength="120">
-          <button type="submit" class="btn-primary">Create project</button>
+          <div class="project-create-actions">
+            <button type="button" id="cancel-create-project-btn" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary">Create project</button>
+          </div>
         </form>
       </section>
 

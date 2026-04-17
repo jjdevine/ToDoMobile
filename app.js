@@ -913,6 +913,7 @@
   }
 
   function renderHome() {
+    closeCreateProjectPanel();
     const projectGrid = $("#project-grid");
     const emptyState = $("#home-empty");
     projectGrid.innerHTML = "";
@@ -1564,6 +1565,18 @@
     return true;
   }
 
+  function openCreateProjectPanel() {
+    $("#create-project-panel").classList.remove("hidden");
+    $("#open-create-project-btn").classList.add("hidden");
+    $("#create-project-name-input").focus();
+  }
+
+  function closeCreateProjectPanel() {
+    $("#create-project-panel").classList.add("hidden");
+    $("#open-create-project-btn").classList.remove("hidden");
+    $("#create-project-name-input").value = "";
+  }
+
   function createManualProject(event) {
     event.preventDefault();
 
@@ -1584,6 +1597,7 @@
     touchProject(projectState);
     schedulePersist("Saving changes...");
     nameInput.value = "";
+    closeCreateProjectPanel();
     openProject(projectId);
   }
 
@@ -1929,6 +1943,8 @@
     eventsBound = true;
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
+    $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
+    $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#back-home-btn").addEventListener("click", () => {
       currentProjectId = null;
       renderHome();

@@ -288,6 +288,15 @@ select {
   gap: 0.75rem;
 }
 
+.create-project-panel {
+  margin-top: -0.2rem;
+}
+
+.project-create-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
 .auth-form input,
 .project-create-form input,
 .task-form input,
@@ -676,6 +685,10 @@ select {
 
   .project-create-form {
     grid-template-columns: 1fr;
+  }
+
+  .project-create-actions {
+    flex-direction: column;
   }
 
   .day-strip {
