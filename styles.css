@@ -987,10 +987,14 @@ select {
     align-items: flex-start;
   }
 
-  .project-actions,
   .toolbar-row,
   .modal-actions {
     flex-direction: column;
+  }
+
+  .project-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 
   .btn-primary,
