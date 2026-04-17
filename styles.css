@@ -13,12 +13,18 @@
   --accent-soft: rgba(108, 140, 255, 0.18);
   --green: #4caf7c;
   --orange: #e0a050;
-  --orange-deep: rgba(120, 68, 24, 0.58);
-  --orange-deep-hover: rgba(146, 84, 30, 0.68);
-  --orange-bottom: rgba(55, 33, 16, 0.92);
-  --orange-bottom-hover: rgba(68, 40, 18, 0.96);
-  --orange-border: rgba(224, 160, 80, 0.95);
-  --orange-glow: rgba(224, 160, 80, 0.18);
+  --orange-deep: rgba(88, 54, 26, 0.34);
+  --orange-deep-hover: rgba(102, 61, 29, 0.42);
+  --orange-bottom: rgba(32, 25, 21, 0.96);
+  --orange-bottom-hover: rgba(40, 30, 23, 0.98);
+  --orange-border: rgba(165, 112, 58, 0.62);
+  --orange-glow: rgba(165, 112, 58, 0.1);
+  --orange-text: #d8b089;
+  --orange-text-strong: #f2dfcd;
+  --orange-project-chip: rgba(58, 40, 27, 0.78);
+  --red-deep: rgba(86, 34, 34, 0.72);
+  --red-deep-hover: rgba(102, 39, 39, 0.8);
+  --red-border: rgba(177, 84, 84, 0.62);
   --red: #cf5c5c;
   --yellow: #f1cc6f;
   --radius: 12px;
@@ -104,7 +110,7 @@ select {
 .project-card {
   background: linear-gradient(180deg, var(--orange-deep), var(--orange-bottom));
   border-color: var(--orange-border);
-  box-shadow: inset 0 1px 0 rgba(255, 224, 184, 0.08), 0 0 0 1px var(--orange-glow);
+  box-shadow: inset 0 1px 0 rgba(255, 231, 207, 0.05), 0 0 0 1px var(--orange-glow);
   padding: 1.1rem 1.2rem;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition), box-shadow var(--transition), transform var(--transition);
@@ -113,22 +119,22 @@ select {
 .project-card:hover {
   background: linear-gradient(180deg, var(--orange-deep-hover), var(--orange-bottom-hover));
   border-color: var(--orange);
-  box-shadow: inset 0 1px 0 rgba(255, 229, 190, 0.12), 0 0 0 1px rgba(224, 160, 80, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 234, 210, 0.08), 0 0 0 1px rgba(165, 112, 58, 0.16);
   transform: translateY(-1px);
 }
 
 .project-card .chip {
-  background: rgba(46, 31, 18, 0.72);
-  color: #e9c89e;
+  background: var(--orange-project-chip);
+  color: var(--orange-text);
 }
 
 .project-card .chip strong,
 .project-card .project-card-title {
-  color: #fff1db;
+  color: var(--orange-text-strong);
 }
 
 .project-card .project-card-footer {
-  color: #efc68d;
+  color: var(--orange-text);
 }
 
 .project-card-top {
@@ -369,6 +375,21 @@ select {
 #project-screen .project-task-view-card,
 #project-screen .day-card {
   text-align: left;
+  background: linear-gradient(180deg, rgba(79, 49, 26, 0.28), rgba(30, 24, 21, 0.96));
+  border-color: rgba(148, 102, 58, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 236, 214, 0.04), 0 0 0 1px rgba(148, 102, 58, 0.08);
+}
+
+#project-screen .project-task-view-card .day-date,
+#project-screen .day-card .day-date,
+#project-screen .project-task-view-card .day-metrics,
+#project-screen .day-card .day-metrics {
+  color: var(--orange-text);
+}
+
+#project-screen .project-task-view-card .day-title,
+#project-screen .day-card .day-title {
+  color: var(--orange-text-strong);
 }
 
 .project-task-view-card {
@@ -376,11 +397,23 @@ select {
 }
 
 .overdue-entry-card {
-  border-color: rgba(207, 92, 92, 0.55);
+  background: linear-gradient(180deg, var(--red-deep), rgba(35, 22, 24, 0.96)) !important;
+  border-color: var(--red-border) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 214, 214, 0.05), 0 0 0 1px rgba(177, 84, 84, 0.08) !important;
+}
+
+.overdue-entry-card .day-date,
+.overdue-entry-card .day-metrics {
+  color: #d8aaaa !important;
+}
+
+.overdue-entry-card .day-title {
+  color: #f2d7d7 !important;
 }
 
 .overdue-entry-card:hover {
-  border-color: var(--red);
+  background: linear-gradient(180deg, var(--red-deep-hover), rgba(42, 24, 27, 0.98)) !important;
+  border-color: var(--red) !important;
 }
 
 .nodate-entry-card {
@@ -402,6 +435,46 @@ select {
 .day-card.selected {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+#project-screen .day-card:hover,
+#project-screen .project-task-view-card:hover {
+  border-color: rgba(190, 134, 77, 0.72);
+  background: linear-gradient(180deg, rgba(92, 57, 30, 0.34), rgba(38, 29, 23, 0.98));
+}
+
+#project-screen .day-card.selected,
+#project-screen .project-task-view-card.selected {
+  border-color: rgba(190, 134, 77, 0.78);
+  background: linear-gradient(180deg, rgba(95, 60, 31, 0.4), rgba(42, 31, 24, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 239, 219, 0.06), 0 0 0 1px rgba(190, 134, 77, 0.14);
+}
+
+#project-screen .overdue-entry-card.selected {
+  background: linear-gradient(180deg, var(--red-deep-hover), rgba(42, 24, 27, 0.98)) !important;
+  border-color: var(--red) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 214, 214, 0.06), 0 0 0 1px rgba(177, 84, 84, 0.12) !important;
+}
+
+#project-screen .day-card.today {
+  background: linear-gradient(180deg, rgba(102, 83, 32, 0.34), rgba(39, 33, 19, 0.98));
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px rgba(241, 204, 111, 0.2);
+}
+
+#project-screen .day-card.today .day-date,
+#project-screen .day-card.today .day-metrics {
+  color: #e6cf99;
+}
+
+#project-screen .day-card.today .day-title {
+  color: #fff1bf;
+}
+
+#project-screen .day-card.today.selected {
+  background: rgba(241, 204, 111, 0.16);
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px rgba(241, 204, 111, 0.24);
 }
 
 .day-card.today {
