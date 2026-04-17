@@ -1,27 +1,168 @@
-The app is a to do list application, designed for web and mobile usage. In the same style as the flashcards application it should be html and javascript based, with supabase persistence and authenticated login. It will be deployed in github pages.
+# Task Planner Spec
 
-The app has one or more projects. When you enter a project, you will be presented with a list of the next 7 days, with metadata visible of how many tasks are required that day, how many are complete, and how many are incomplete. The list item for today should be highlighted in a more prominent colour.
+This document describes the current implemented functionality of the Task Planner application.
 
-When you select one of the days, the tasks for that days are shown.
+## Platform and deployment
 
-Tasks for each project are automatically generation by configuration files. The name of each configuration file maps to the project name. Eg "Daily Tasks.txt" becomes the "Daily Tasks" project.
+The app is a web-based task planner designed for desktop and mobile use. It is built with HTML, CSS, and JavaScript and is suitable for deployment to GitHub Pages.
 
-Each time the app is loaded, the project checks the configuration file and adds any tasks that needed to be added for days now in scope. For example if the user opens the app on monday, the app should process any new tasks required until the end of the week. A button to manually request this process should also be provided.
+The app supports Supabase authentication and cloud persistence when Supabase is configured. It can also be used in local-only mode, either because Supabase keys are not present or because the user chooses to continue without signing in.
 
-The configuration file is in the format of the example "Daily Tasks.txt" attached. The logic to convert this format into tasks is demonstrated in the provided code ToDoListGenerator.java
+The application supports offline use through a service worker.
 
-Tasks can be manually added into the application. They should have a mandatory name, and an optional description. Tasks can have a due date, but can also have no due date, in which case they appear in a "No Due Date" section of a project rather than within a specific date.
+## Project sources
 
-Tasks can be marked as complete, at which point they are removed from the list, and stored in an archive. The user should be prompted to confirm before a task is marked as complete.
+The app supports two kinds of projects:
 
-Tasks can be deferred to a future date. When deferring a task you are asked for a day within the next 7 days you want to defer it to.
+1. Generated projects, created from `.txt` configuration files in the `Projects/` folder.
+2. Manual projects, created directly in the UI without any corresponding configuration file.
 
-Tasks that are from previous days but incomplete should be shown in an "overdue" list within the project
+For generated projects, the project name is derived from the configuration filename. For example, `Daily Tasks.txt` becomes the `Daily Tasks` project.
 
-A project should give an option to download all active tasks. Archives can also be downloaded.
+Manual projects are task containers for user-created tasks only. They do not have recurring generation rules, and refresh actions for those projects are disabled.
 
-Archives can be deleted. Users should be prompted to confirm before deletion.
+## Home screen
 
-Changes to the list are persisted 2 seconds after they are made.
+The home screen shows all projects as cards.
 
-The application should work offline using a service worker approach.
+Each project card shows:
+
+- The project name
+- Whether it is a recurring project or a manual project
+- Counts for active tasks, due today, overdue tasks, tasks with no due date, and archived tasks
+- Generation status for recurring projects, or a manual-project label for manual projects
+
+The home screen also provides:
+
+- A `Generate tasks now` action to run recurring task generation for all generated projects
+- A `New Project` form for creating manual projects
+
+If there are no projects, the app explains that the user can either add a `.txt` file to `Projects/` and run `node build.js`, or create a manual project in the UI.
+
+## Recurring project generation
+
+Recurring projects are defined by text configuration files. The configuration format matches the example `Daily Tasks.txt`, and the parsing logic is based on the provided `ToDoListGenerator.java`.
+
+Supported recurring rules are:
+
+- Weekly rules, using named weekdays
+- Monthly rules, using day numbers
+
+On app load, generated projects create any missing recurring tasks from today through the end of the current 7-day window.
+
+The user can also manually trigger recurring generation:
+
+- For all generated projects from the home screen
+- For the current generated project from the project screen or day/task-list screen
+
+Generated tasks are tagged as recurring. User-created tasks are tagged as manual.
+
+## Project screen
+
+When a project is opened, the project screen acts as a navigation and summary view rather than a task-list view.
+
+The project screen contains:
+
+- A refresh button for recurring projects
+- An `Overdue` entry directly below the refresh button
+- A `Next 7 Days` list
+- Summary cards for `Active`, `Due Today`, `Overdue`, and `No Due Date`
+- An `Add Task` form
+
+Today is highlighted within the 7-day list.
+
+The `Overdue` entry appears above the `Next 7 Days` list. It opens a dedicated overdue task-list view. Task items themselves are not shown directly on the project screen.
+
+Selecting one of the day entries opens the task-list view for that specific day.
+
+The `Add Task` form on the project screen allows the user to create a manual task with:
+
+- A required name
+- An optional description
+- An optional due date
+
+Manual tasks may also have no due date.
+
+## Task-list screen
+
+The task-list screen is used for both:
+
+- A selected day
+- The overdue view
+
+When a normal day is opened, the task-list screen shows:
+
+- A section for the selected day
+- A `Later` section for tasks due after the current 7-day window, when applicable
+- A `No Due Date` section for undated tasks, when applicable
+
+When the overdue view is opened, the task-list screen shows overdue tasks only.
+
+The task-list screen also provides:
+
+- A refresh button for recurring projects
+- A `Download active` action for exporting all active tasks in the project
+- A `View archive` action to open the archive screen
+- An `Add Task` form
+
+## Task behavior
+
+Tasks can be created automatically from recurring configuration, or manually by the user.
+
+Each active task can show:
+
+- Its due date, or a `no due date` marker
+- Whether it is recurring or manual
+
+Active tasks support the following actions:
+
+- `Complete`
+- `Defer` or `Schedule`
+- `Edit`
+- `Delete`
+
+Completing a task prompts for confirmation, removes it from the active list, and moves it into the archive.
+
+Deferring a task prompts the user to choose a new date within the remaining visible day range, from tomorrow through the end of the current 7-day window.
+
+Editing a task allows the user to update its name, description, and due date, including clearing the due date.
+
+Deleting an active task is a permanent delete and does not move the task into the archive.
+
+## Overdue and no-date behavior
+
+Tasks whose due dates are before today are treated as overdue.
+
+Overdue tasks are accessed from the dedicated `Overdue` entry on the project screen and shown in their own task-list view.
+
+Tasks with no due date are not attached to a specific day. They appear in the `No Due Date` section of the normal day-based task-list screen.
+
+## Archive behavior
+
+Completed tasks are stored in a per-project archive.
+
+The archive is shown on its own screen and includes:
+
+- A list of completed tasks
+- A `Download archive` action
+- A `Delete archive` action for removing the entire archive
+
+Users are prompted before deleting the full archive.
+
+Archived tasks also support individual deletion.
+
+## Editing, persistence, and sync
+
+Changes are persisted 2 seconds after they are made.
+
+The app stores state locally and, when the user is signed in, also syncs state to Supabase.
+
+When cloud sync is enabled, the app supports:
+
+- Sign up
+- Sign in
+- Sign out
+- Manual sync
+- Automatic merge of local and remote state
+
+If the user is not signed in, the app continues in local-only mode.
