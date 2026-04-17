@@ -602,6 +602,73 @@
     );
   }
 
+  function getManifestProject(projectId) {
+    return manifest.projects.find((project) => project.id === projectId) || null;
+  }
+
+  function getManualProjects() {
+    const manifestIds = new Set(manifest.projects.map((project) => project.id));
+    return Object.keys(appState.projects)
+      .filter((projectId) => !manifestIds.has(projectId))
+      .map((projectId) => {
+        const projectState = appState.projects[projectId];
+        return {
+          id: projectId,
+          name: projectState && projectState.name ? projectState.name : projectId,
+          file: null,
+          hasConfig: false,
+        };
+      })
+      .filter((project) => project.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function getAllProjects() {
+    return manifest.projects
+      .map((project) => ({
+        ...project,
+        hasConfig: true,
+      }))
+      .concat(getManualProjects());
+  }
+
+  function getProjectMeta(projectId) {
+    const manifestProject = getManifestProject(projectId);
+    if (manifestProject) {
+      return {
+        ...manifestProject,
+        hasConfig: true,
+      };
+    }
+
+    const projectState = appState.projects[projectId];
+    if (!projectState || !projectState.name) return null;
+
+    return {
+      id: projectId,
+      name: projectState.name,
+      file: null,
+      hasConfig: false,
+    };
+  }
+
+  function buildManualProjectId(name) {
+    const slug = String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "project";
+    let candidate = "manual-" + slug;
+    let suffix = 2;
+
+    while (getProjectMeta(candidate) || appState.projects[candidate]) {
+      candidate = "manual-" + slug + "-" + suffix;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
   function ensureProjectState(projectId, projectName) {
     if (!appState.projects[projectId]) {
       appState.projects[projectId] = createEmptyProjectState(projectId, projectName);
@@ -638,7 +705,7 @@
   }
 
   function generateTasksForProject(projectId) {
-    const projectManifest = manifest.projects.find((project) => project.id === projectId);
+    const projectManifest = getManifestProject(projectId);
     if (!projectManifest) return { created: 0, changed: false };
 
     const projectState = ensureProjectState(projectId, projectManifest.name);
@@ -848,15 +915,16 @@
     const projectGrid = $("#project-grid");
     const emptyState = $("#home-empty");
     projectGrid.innerHTML = "";
+    const projects = getAllProjects();
 
-    if (!manifest.projects.length) {
+    if (!projects.length) {
       emptyState.classList.remove("hidden");
       return;
     }
 
     emptyState.classList.add("hidden");
 
-    manifest.projects.forEach((project) => {
+    projects.forEach((project) => {
       const stats = buildProjectStats(project.id);
       const projectState = ensureProjectState(project.id, project.name);
       const card = document.createElement("div");
@@ -876,6 +944,7 @@
 
       const meta = document.createElement("div");
       meta.className = "project-card-meta";
+      meta.appendChild(createChip(project.hasConfig ? "recurring" : "manual project"));
       meta.appendChild(createChip("due today", String(stats.dueToday)));
       meta.appendChild(createChip("overdue", String(stats.overdue)));
       meta.appendChild(createChip("no date", String(stats.noDueDate)));
@@ -883,14 +952,28 @@
 
       const footer = document.createElement("div");
       footer.className = "project-card-footer";
-      footer.textContent = projectState.lastGeneratedThrough
+      footer.textContent = project.hasConfig && projectState.lastGeneratedThrough
         ? "Generated through " + formatDateShort(projectState.lastGeneratedThrough)
-        : "Not generated yet";
+        : project.hasConfig
+          ? "Not generated yet"
+          : "Manual project with your own tasks";
 
       card.appendChild(topRow);
       card.appendChild(meta);
       card.appendChild(footer);
       projectGrid.appendChild(card);
+    });
+  }
+
+  function updateRefreshButtons(project) {
+    const projectButtons = ["#refresh-project-btn", "#refresh-day-project-btn"];
+    const hasConfig = !!(project && project.hasConfig);
+    projectButtons.forEach((selector) => {
+      const button = $(selector);
+      if (!button) return;
+      button.disabled = !hasConfig;
+      button.textContent = hasConfig ? "Refresh tasks" : "No recurring config";
+      button.title = hasConfig ? "Generate any recurring tasks now" : "This project does not have a recurring configuration file.";
     });
   }
 
@@ -1110,40 +1193,60 @@
     return section;
   }
 
-  function renderTaskSections(projectId) {
-    const taskSections = $("#task-sections");
-    taskSections.innerHTML = "";
-
+  function getTaskBuckets(projectId, dateKey) {
     const today = todayKey();
     const visibleEnd = addDays(today, 6);
     const tasks = sortActiveTasks(getProjectTasks(projectId));
-    const overdueTasks = tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, today) < 0);
-    const selectedTasks = tasks.filter((task) => task.dueDate === selectedDate);
-    const laterTasks = tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, visibleEnd) > 0);
-    const noDateTasks = tasks.filter((task) => !task.dueDate);
+    return {
+      overdue: tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, today) < 0),
+      selected: tasks.filter((task) => task.dueDate === dateKey),
+      later: tasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, visibleEnd) > 0),
+      noDate: tasks.filter((task) => !task.dueDate),
+    };
+  }
 
-    if (overdueTasks.length) {
-      taskSections.appendChild(buildTaskSection("Overdue", overdueTasks, {
+  function renderProjectTaskSections(projectId) {
+    const taskSections = $("#project-task-sections");
+    taskSections.innerHTML = "";
+
+    const today = todayKey();
+    const taskBuckets = getTaskBuckets(projectId, today);
+
+    if (taskBuckets.overdue.length) {
+      taskSections.appendChild(buildTaskSection("Overdue", taskBuckets.overdue, {
         overdue: true,
         archived: false,
       }));
     }
 
-    taskSections.appendChild(buildTaskSection(formatDateLong(selectedDate), selectedTasks, {
+    taskSections.appendChild(buildTaskSection("Today", taskBuckets.selected, {
+      overdue: false,
+      archived: false,
+      emptyMessage: "No tasks are due today.",
+    }));
+  }
+
+  function renderTaskSections(projectId) {
+    const taskSections = $("#task-sections");
+    taskSections.innerHTML = "";
+
+    const taskBuckets = getTaskBuckets(projectId, selectedDate);
+
+    taskSections.appendChild(buildTaskSection(formatDateLong(selectedDate), taskBuckets.selected, {
       overdue: false,
       archived: false,
       emptyMessage: "No tasks are due on this day.",
     }));
 
-    if (laterTasks.length) {
-      taskSections.appendChild(buildTaskSection("Later", laterTasks, {
+    if (taskBuckets.later.length) {
+      taskSections.appendChild(buildTaskSection("Later", taskBuckets.later, {
         overdue: false,
         archived: false,
       }));
     }
 
-    if (noDateTasks.length) {
-      taskSections.appendChild(buildTaskSection("No Due Date", noDateTasks, {
+    if (taskBuckets.noDate.length) {
+      taskSections.appendChild(buildTaskSection("No Due Date", taskBuckets.noDate, {
         overdue: false,
         archived: false,
       }));
@@ -1153,7 +1256,7 @@
   function renderProject() {
     if (!currentProjectId) return;
 
-    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    const project = getProjectMeta(currentProjectId);
     if (!project) {
       renderHome();
       showScreen("home");
@@ -1163,18 +1266,22 @@
     ensureProjectState(project.id, project.name);
 
     $("#project-title").textContent = project.name;
-    $("#project-subtitle").textContent = "Select a day to view its tasks.";
+    $("#project-subtitle").textContent = project.hasConfig
+      ? "Select a day to view its tasks."
+      : "Manual project. Add your own tasks and use the date list to focus each day.";
 
     configureTaskDateInput("project-task-date-input");
     renderDayStrip(project.id);
     renderSummary(project.id);
+    renderProjectTaskSections(project.id);
+    updateRefreshButtons(project);
     showScreen("project");
   }
 
   function renderDayView() {
     if (!currentProjectId) return;
 
-    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    const project = getProjectMeta(currentProjectId);
     if (!project) {
       renderHome();
       showScreen("home");
@@ -1188,13 +1295,14 @@
     configureTaskDateInput("day-task-date-input", selectedDate);
     updateArchiveButtonLabel();
     renderTaskSections(project.id);
+    updateRefreshButtons(project);
     showScreen("day");
   }
 
   function renderArchiveScreen() {
     if (!currentProjectId) return;
 
-    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    const project = getProjectMeta(currentProjectId);
     const archiveList = $("#archive-list");
     const emptyState = $("#archive-empty");
     archiveList.innerHTML = "";
@@ -1294,6 +1402,29 @@
     }
 
     renderCurrentScreen();
+  }
+
+  function createManualProject(event) {
+    event.preventDefault();
+
+    const nameInput = $("#create-project-name-input");
+    const name = nameInput.value.trim();
+    if (!name) return;
+
+    const existingProject = getAllProjects().find((project) => project.name.toLowerCase() === name.toLowerCase());
+    if (existingProject) {
+      setSyncStatus('A project named "' + name + '" already exists.');
+      nameInput.focus();
+      nameInput.select();
+      return;
+    }
+
+    const projectId = buildManualProjectId(name);
+    const projectState = ensureProjectState(projectId, name);
+    touchProject(projectState);
+    schedulePersist("Saving changes...");
+    nameInput.value = "";
+    openProject(projectId);
   }
 
   function completeTask(taskId) {
@@ -1482,7 +1613,7 @@
   }
 
   function buildTaskExport(projectId, archived) {
-    const project = manifest.projects.find((entry) => entry.id === projectId);
+    const project = getProjectMeta(projectId);
     const title = project ? project.name : projectId;
     const tasks = archived ? sortArchivedTasks(getProjectArchivedTasks(projectId)) : sortActiveTasks(getProjectTasks(projectId));
 
@@ -1515,20 +1646,25 @@
 
   function downloadActiveTasks() {
     if (!currentProjectId) return;
-    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    const project = getProjectMeta(currentProjectId);
     const name = project ? project.name : currentProjectId;
     downloadTextFile(name + " Active Tasks.txt", buildTaskExport(currentProjectId, false));
   }
 
   function downloadArchiveTasks() {
     if (!currentProjectId) return;
-    const project = manifest.projects.find((entry) => entry.id === currentProjectId);
+    const project = getProjectMeta(currentProjectId);
     const name = project ? project.name : currentProjectId;
     downloadTextFile(name + " Archive.txt", buildTaskExport(currentProjectId, true));
   }
 
   function refreshCurrentProject() {
     if (!currentProjectId) return;
+    const project = getProjectMeta(currentProjectId);
+    if (!project || !project.hasConfig) {
+      setSyncStatus("This project has no recurring config file to refresh.");
+      return;
+    }
     const result = generateTasksForProject(currentProjectId);
     if (result.changed) {
       schedulePersist(result.created ? "Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "." : "Generation window refreshed.");
@@ -1623,6 +1759,7 @@
     });
     $("#download-archive-btn").addEventListener("click", downloadArchiveTasks);
     $("#delete-archive-btn").addEventListener("click", clearArchive);
+    $("#create-project-form").addEventListener("submit", createManualProject);
     $("#project-add-task-form").addEventListener("submit", (event) => {
       event.preventDefault();
       addManualTaskFromForm("project-task-name-input", "project-task-description-input", "project-task-date-input");

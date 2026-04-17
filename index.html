@@ -44,9 +44,20 @@
         <button id="generate-all-btn" class="btn-primary">Generate tasks now</button>
       </div>
 
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>New Project</h3>
+          <p class="subtitle">Create a project with your own tasks only, with no matching `.txt` file required.</p>
+        </div>
+        <form id="create-project-form" class="project-create-form">
+          <input type="text" id="create-project-name-input" placeholder="Project name" required maxlength="120">
+          <button type="submit" class="btn-primary">Create project</button>
+        </form>
+      </section>
+
       <div id="project-grid" class="project-grid"></div>
       <div id="home-empty" class="empty-state hidden">
-        No project files were found. Add a `.txt` file to `Projects/` and run `node build.js`.
+        No projects yet. Add a `.txt` file to `Projects/` and run `node build.js`, or create a manual project above.
       </div>
     </div>
 
@@ -72,6 +83,7 @@
       </section>
 
       <div id="project-summary" class="summary-grid"></div>
+      <div id="project-task-sections" class="task-sections"></div>
 
       <section class="panel add-task-panel">
         <div class="panel-heading">
