@@ -61,7 +61,7 @@
   let currentProjectId = null;
   let selectedDate = todayKey();
   let selectedTaskView = "day";
-  let condensedMode = false;
+  let condensedMode = true;
   let expandedTaskCards = {};
   let deferTaskId = null;
   let editTaskId = null;
@@ -1292,14 +1292,13 @@
 
     controls.innerHTML = "";
 
-    const label = document.createElement("label");
-    label.className = "task-list-toggle";
-
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = condensedMode;
-    input.addEventListener("change", () => {
-      condensedMode = input.checked;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "task-list-toggle" + (condensedMode ? " active" : "");
+    toggle.setAttribute("aria-pressed", condensedMode ? "true" : "false");
+    toggle.textContent = condensedMode ? "Condensed mode: On" : "Condensed mode: Off";
+    toggle.addEventListener("click", () => {
+      condensedMode = !condensedMode;
       if (!condensedMode) {
         expandedTaskCards = {};
       }
@@ -1308,12 +1307,7 @@
       }
     });
 
-    const text = document.createElement("span");
-    text.textContent = "Condensed mode";
-
-    label.appendChild(input);
-    label.appendChild(text);
-    controls.appendChild(label);
+    controls.appendChild(toggle);
   }
 
   function buildTaskMeta(task, archived) {
