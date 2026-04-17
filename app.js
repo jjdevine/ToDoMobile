@@ -4,6 +4,7 @@
   const STORAGE_KEY = "task_planner_state_v1";
   const TABLE_NAME = "todo_state";
   const SAVE_DELAY_MS = 2000;
+  const COMPLETE_DELAY_MS = 3000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
@@ -62,6 +63,7 @@
   let selectedTaskView = "day";
   let deferTaskId = null;
   let editTaskId = null;
+  let pendingTaskCompletions = {};
 
   let manifest = { buildTime: Date.now(), projects: [] };
   let projectConfigs = {};
@@ -91,6 +93,31 @@
       lastGeneratedThrough: null,
       updatedAt: nowIso(),
     };
+  }
+
+  function buildPendingTaskCompletionKey(projectId, taskId) {
+    return projectId + "::" + taskId;
+  }
+
+  function getPendingTaskCompletion(projectId, taskId) {
+    if (!projectId || !taskId) return null;
+    return pendingTaskCompletions[buildPendingTaskCompletionKey(projectId, taskId)] || null;
+  }
+
+  function clearPendingTaskCompletion(projectId, taskId) {
+    const pendingKey = buildPendingTaskCompletionKey(projectId, taskId);
+    const pending = pendingTaskCompletions[pendingKey];
+    if (!pending) return null;
+    clearTimeout(pending.timeoutId);
+    delete pendingTaskCompletions[pendingKey];
+    return pending;
+  }
+
+  function clearAllPendingTaskCompletions() {
+    Object.keys(pendingTaskCompletions).forEach((pendingKey) => {
+      clearTimeout(pendingTaskCompletions[pendingKey].timeoutId);
+    });
+    pendingTaskCompletions = {};
   }
 
   function isPlainObject(value) {
@@ -373,6 +400,7 @@
   }
 
   function loadLocalState() {
+    clearAllPendingTaskCompletions();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       appState = raw ? normalizeState(JSON.parse(raw)) : createEmptyState();
@@ -1216,6 +1244,8 @@
     card.className = "task-card";
     if (options.overdue) card.classList.add("overdue");
     if (!task.dueDate) card.classList.add("nodate");
+    const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
+    if (pendingCompletion) card.classList.add("pending-completion");
 
     const titleRow = document.createElement("div");
     titleRow.className = "task-card-title-row";
@@ -1247,6 +1277,18 @@
         deleteArchivedTask(task.id);
       });
       actions.appendChild(deleteButton);
+    } else if (pendingCompletion) {
+      actions.classList.add("pending-completion-actions");
+
+      const cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.className = "task-btn cancel-completion";
+      cancelButton.textContent = "Cancel Completion...";
+      cancelButton.addEventListener("click", () => {
+        cancelTaskCompletion(task.id, task.projectId);
+      });
+
+      actions.appendChild(cancelButton);
     } else {
       const completeButton = document.createElement("button");
       completeButton.type = "button";
@@ -1623,8 +1665,41 @@
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[taskId];
     if (!task) return;
+    if (getPendingTaskCompletion(currentProjectId, taskId)) return;
 
-    if (!confirm('Mark "' + task.name + '" as complete?')) return;
+    const projectId = currentProjectId;
+    const pendingKey = buildPendingTaskCompletionKey(projectId, taskId);
+    pendingTaskCompletions[pendingKey] = {
+      projectId,
+      taskId,
+      timeoutId: setTimeout(() => {
+        finalizeTaskCompletion(projectId, taskId);
+      }, COMPLETE_DELAY_MS),
+    };
+
+    renderCurrentScreen();
+  }
+
+  function cancelTaskCompletion(taskId, projectId) {
+    const resolvedProjectId = projectId || currentProjectId;
+    if (!resolvedProjectId) return;
+    if (!clearPendingTaskCompletion(resolvedProjectId, taskId)) return;
+    renderCurrentScreen();
+  }
+
+  function finalizeTaskCompletion(projectId, taskId) {
+    if (!clearPendingTaskCompletion(projectId, taskId)) return;
+
+    const projectState = appState.projects[projectId];
+    if (!projectState) {
+      renderCurrentScreen();
+      return;
+    }
+    const task = projectState.tasks[taskId];
+    if (!task) {
+      renderCurrentScreen();
+      return;
+    }
 
     const timestamp = nowIso();
     delete projectState.tasks[taskId];
@@ -2019,6 +2094,7 @@
       if (supabase) {
         await supabase.auth.signOut();
       }
+      clearAllPendingTaskCompletions();
       currentUser = null;
       appEntered = false;
       currentProjectId = null;
@@ -2079,6 +2155,7 @@
           currentUser = session.user;
           enterApp();
         } else if (event === "SIGNED_OUT") {
+          clearAllPendingTaskCompletions();
           currentUser = null;
           appEntered = false;
           currentProjectId = null;
