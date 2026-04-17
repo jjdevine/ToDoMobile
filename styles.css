@@ -13,6 +13,9 @@
   --accent-soft: rgba(108, 140, 255, 0.18);
   --green: #4caf7c;
   --orange: #e0a050;
+  --orange-deep: rgba(97, 57, 20, 0.35);
+  --orange-deep-hover: rgba(122, 72, 24, 0.42);
+  --orange-border: rgba(224, 160, 80, 0.72);
   --red: #cf5c5c;
   --yellow: #f1cc6f;
   --radius: 12px;
@@ -96,14 +99,16 @@ select {
 }
 
 .project-card {
+  background: linear-gradient(180deg, var(--orange-deep), rgba(26, 29, 39, 0.96));
+  border-color: var(--orange-border);
   padding: 1.1rem 1.2rem;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition), transform var(--transition);
 }
 
 .project-card:hover {
-  background: var(--surface-hover);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--orange-deep-hover), rgba(36, 40, 54, 0.96));
+  border-color: var(--orange);
   transform: translateY(-1px);
 }
 
