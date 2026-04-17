@@ -4,6 +4,7 @@ importScripts('./sw-version.js');
 
 const CACHE_NAME = 'task-planner-' + CACHE_VERSION;
 const CDN_SCRIPT = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+const REQUEST_TIMEOUT_MS = 10000;
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -27,7 +28,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
       const response = await fetch(event.request, { signal: controller.signal });
