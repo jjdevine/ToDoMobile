@@ -71,6 +71,7 @@
       </header>
 
       <div class="project-actions">
+        <button id="open-project-add-task-btn" class="btn-secondary">Add task</button>
         <button id="refresh-project-btn" class="btn-primary">Refresh tasks</button>
       </div>
 
@@ -86,18 +87,6 @@
 
       <div id="project-summary" class="summary-grid"></div>
 
-      <section class="panel add-task-panel">
-        <div class="panel-heading">
-          <h3>Add Task</h3>
-          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
-        </div>
-        <form id="project-add-task-form" class="task-form">
-          <input type="text" id="project-task-name-input" placeholder="Task name" required maxlength="120">
-          <textarea id="project-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
-          <input type="date" id="project-task-date-input">
-          <button type="submit" class="btn-primary">Add task</button>
-        </form>
-      </section>
     </div>
 
     <div id="day-screen" class="screen">
@@ -110,25 +99,13 @@
       </header>
 
       <div class="project-actions">
+        <button id="open-day-add-task-btn" class="btn-primary">Add task</button>
         <button id="refresh-day-project-btn" class="btn-primary">Refresh tasks</button>
         <button id="download-active-btn" class="btn-secondary">Download active</button>
         <button id="view-archive-btn" class="btn-secondary">View archive</button>
       </div>
 
       <div id="task-sections" class="task-sections"></div>
-
-      <section class="panel add-task-panel">
-        <div class="panel-heading">
-          <h3>Add Task</h3>
-          <p class="subtitle">Manual tasks can use any future due date or stay undated.</p>
-        </div>
-        <form id="day-add-task-form" class="task-form">
-          <input type="text" id="day-task-name-input" placeholder="Task name" required maxlength="120">
-          <textarea id="day-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
-          <input type="date" id="day-task-date-input">
-          <button type="submit" class="btn-primary">Add task</button>
-        </form>
-      </section>
     </div>
 
     <div id="archive-screen" class="screen">
@@ -173,6 +150,22 @@
         <div class="modal-actions">
           <button id="cancel-edit-btn" type="button" class="btn-secondary">Cancel</button>
           <button id="save-edit-btn" type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="add-task-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Add Task</h3>
+      <p class="modal-text">Manual tasks can use any future due date or stay undated.</p>
+      <form id="add-task-form" class="task-form">
+        <input type="text" id="add-task-name-input" placeholder="Task name" required maxlength="120">
+        <textarea id="add-task-description-input" placeholder="Description (optional)" rows="3" maxlength="800"></textarea>
+        <input type="date" id="add-task-date-input">
+        <div class="modal-actions">
+          <button id="cancel-add-task-btn" type="button" class="btn-secondary">Cancel</button>
+          <button id="confirm-add-task-btn" type="submit" class="btn-primary">Add task</button>
         </div>
       </form>
     </div>

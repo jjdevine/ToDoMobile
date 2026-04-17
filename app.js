@@ -1078,9 +1078,7 @@
     const input = $("#" + inputId);
     if (!input) return;
     input.min = todayKey();
-    if (defaultDate && !input.value) {
-      input.value = defaultDate;
-    }
+    input.value = defaultDate || "";
   }
 
   function renderDayStrip(projectId) {
@@ -1402,7 +1400,6 @@
       ? "Select a day to view its tasks."
       : "Manual project. Add your own tasks and use the date list to focus each day.";
 
-    configureTaskDateInput("project-task-date-input");
     renderProjectTaskViewCards(project.id);
     renderDayStrip(project.id);
     renderSummary(project.id);
@@ -1438,7 +1435,6 @@
       $("#day-subtitle").textContent = project.name + " · " + stats.incomplete + " incomplete · " + stats.complete + " complete";
     }
 
-    configureTaskDateInput("day-task-date-input", selectedDate);
     updateArchiveButtonLabel();
     renderTaskSections(project.id);
     updateRefreshButtons(project);
@@ -1526,7 +1522,7 @@
   }
 
   function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
-    if (!currentProjectId) return;
+    if (!currentProjectId) return false;
 
     const projectState = ensureProjectState(currentProjectId, "");
     const nameInput = $("#" + nameInputId);
@@ -1535,7 +1531,7 @@
     const name = nameInput.value.trim();
     const description = descriptionInput.value.trim();
 
-    if (!name) return;
+    if (!name) return false;
 
     const timestamp = nowIso();
     const taskId = createId("task");
@@ -1565,6 +1561,7 @@
     }
 
     renderCurrentScreen();
+    return true;
   }
 
   function createManualProject(event) {
@@ -1628,6 +1625,33 @@
     editTaskId = null;
     $("#edit-modal").classList.add("hidden");
     $("#edit-modal").setAttribute("aria-hidden", "true");
+  }
+
+  function getDefaultAddTaskDate() {
+    return selectedTaskView === "day" && isDateKey(selectedDate) ? selectedDate : "";
+  }
+
+  function openAddTaskModal() {
+    if (!currentProjectId) return;
+    $("#add-task-name-input").value = "";
+    $("#add-task-description-input").value = "";
+    configureTaskDateInput("add-task-date-input", getDefaultAddTaskDate());
+    $("#add-task-modal").classList.remove("hidden");
+    $("#add-task-modal").setAttribute("aria-hidden", "false");
+    $("#add-task-name-input").focus();
+  }
+
+  function closeAddTaskModal() {
+    $("#add-task-modal").classList.add("hidden");
+    $("#add-task-modal").setAttribute("aria-hidden", "true");
+  }
+
+  function submitAddTask(event) {
+    event.preventDefault();
+    const added = addManualTaskFromForm("add-task-name-input", "add-task-description-input", "add-task-date-input");
+    if (!added) return;
+
+    closeAddTaskModal();
   }
 
   function saveEditedTask(event) {
@@ -1910,8 +1934,14 @@
       renderHome();
       showScreen("home");
     });
+    $("#open-project-add-task-btn").addEventListener("click", () => {
+      openAddTaskModal();
+    });
     $("#back-project-from-day-btn").addEventListener("click", () => {
       renderProject();
+    });
+    $("#open-day-add-task-btn").addEventListener("click", () => {
+      openAddTaskModal();
     });
     $("#refresh-project-btn").addEventListener("click", refreshCurrentProject);
     $("#refresh-day-project-btn").addEventListener("click", refreshCurrentProject);
@@ -1923,18 +1953,17 @@
     $("#download-archive-btn").addEventListener("click", downloadArchiveTasks);
     $("#delete-archive-btn").addEventListener("click", clearArchive);
     $("#create-project-form").addEventListener("submit", createManualProject);
-    $("#project-add-task-form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      addManualTaskFromForm("project-task-name-input", "project-task-description-input", "project-task-date-input");
-    });
-    $("#day-add-task-form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      addManualTaskFromForm("day-task-name-input", "day-task-description-input", "day-task-date-input");
-    });
+    $("#cancel-add-task-btn").addEventListener("click", closeAddTaskModal);
+    $("#add-task-form").addEventListener("submit", submitAddTask);
     $("#cancel-defer-btn").addEventListener("click", closeDeferModal);
     $("#confirm-defer-btn").addEventListener("click", confirmDeferTask);
     $("#cancel-edit-btn").addEventListener("click", closeEditModal);
     $("#edit-task-form").addEventListener("submit", saveEditedTask);
+    $("#add-task-modal").addEventListener("click", (event) => {
+      if (event.target === $("#add-task-modal")) {
+        closeAddTaskModal();
+      }
+    });
     $("#defer-modal").addEventListener("click", (event) => {
       if (event.target === $("#defer-modal")) {
         closeDeferModal();
