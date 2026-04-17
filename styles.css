@@ -199,6 +199,14 @@ select {
 
 .btn-primary:hover { background: var(--accent-hover); }
 
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled,
+.task-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn-secondary {
   background: var(--surface);
   border-color: var(--border);
@@ -274,7 +282,14 @@ select {
   gap: 0.75rem;
 }
 
+.project-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
 .auth-form input,
+.project-create-form input,
 .task-form input,
 .task-form textarea,
 .task-form select,
@@ -289,6 +304,7 @@ select {
 }
 
 .auth-form input:focus,
+.project-create-form input:focus,
 .task-form input:focus,
 .task-form textarea:focus,
 .task-form select:focus,
@@ -318,6 +334,7 @@ select {
 .day-card {
   padding: 0.8rem;
   cursor: pointer;
+  color: var(--text);
   transition: border-color var(--transition), background var(--transition), transform var(--transition);
 }
 
@@ -343,6 +360,7 @@ select {
 .day-title {
   font-size: 0.9rem;
   font-weight: 600;
+  color: var(--text);
 }
 
 .day-date {
@@ -631,6 +649,10 @@ select {
   .btn-secondary,
   .btn-danger {
     width: 100%;
+  }
+
+  .project-create-form {
+    grid-template-columns: 1fr;
   }
 
   .day-strip {
