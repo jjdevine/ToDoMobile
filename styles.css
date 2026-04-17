@@ -323,12 +323,26 @@ select {
   gap: 0.6rem;
 }
 
+.project-overdue-entry {
+  margin-bottom: 1rem;
+}
+
 #project-screen .day-strip {
   grid-template-columns: 1fr;
 }
 
+#project-screen .overdue-entry-card,
 #project-screen .day-card {
   text-align: left;
+}
+
+.overdue-entry-card {
+  width: 100%;
+  border-color: rgba(207, 92, 92, 0.55);
+}
+
+.overdue-entry-card:hover {
+  border-color: var(--red);
 }
 
 .day-card {
