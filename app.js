@@ -4,7 +4,7 @@
   const STORAGE_KEY = "task_planner_state_v1";
   const TABLE_NAME = "todo_state";
   const SAVE_DELAY_MS = 2000;
-  const COMPLETE_DELAY_MS = 3000;
+  const COMPLETE_DELAY_MS = 2000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [

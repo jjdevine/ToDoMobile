@@ -57,3 +57,4 @@ Tuna-weekly-friday
 Bread-weekly-friday
 Teabags-weekly-friday
 Noodles-weekly-friday
+Kitchen Roll-weekly-friday
