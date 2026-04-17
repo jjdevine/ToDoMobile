@@ -978,6 +978,34 @@
     });
   }
 
+  function ensureProjectTaskViewCardsContainer() {
+    const projectScreen = $("#project-screen");
+    if (!projectScreen) return null;
+
+    let container = $("#project-task-view-cards") || $("#project-overdue-entry");
+    if (!container) {
+      container = document.createElement("div");
+    }
+
+    container.id = "project-task-view-cards";
+    container.className = "project-task-view-cards";
+
+    const nextSevenDaysPanel = projectScreen.querySelector("section.panel");
+    if (nextSevenDaysPanel) {
+      projectScreen.insertBefore(container, nextSevenDaysPanel);
+      return container;
+    }
+
+    const projectActions = projectScreen.querySelector(".project-actions");
+    if (projectActions) {
+      projectActions.insertAdjacentElement("afterend", container);
+      return container;
+    }
+
+    projectScreen.appendChild(container);
+    return container;
+  }
+
   function buildProjectTaskViewCard(titleText, detailText, descriptionText, onOpen, className) {
     const card = document.createElement("button");
     card.type = "button";
@@ -1003,7 +1031,7 @@
   }
 
   function renderProjectTaskViewCards(projectId) {
-    const container = $("#project-task-view-cards");
+    const container = ensureProjectTaskViewCardsContainer();
     if (!container) return;
     container.innerHTML = "";
 
