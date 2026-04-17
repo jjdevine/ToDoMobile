@@ -970,7 +970,24 @@
       title.className = "project-card-title";
       title.textContent = project.name;
       topRow.appendChild(title);
-      topRow.appendChild(createChip("active", String(stats.active)));
+
+      const topRowActions = document.createElement("div");
+      topRowActions.className = "project-card-top-actions";
+      topRowActions.appendChild(createChip("active", String(stats.active)));
+
+      if (!project.hasConfig) {
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "project-card-delete";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          deleteManualProject(project.id);
+        });
+        topRowActions.appendChild(deleteButton);
+      }
+
+      topRow.appendChild(topRowActions);
 
       const meta = document.createElement("div");
       meta.className = "project-card-meta";
@@ -993,6 +1010,22 @@
       card.appendChild(footer);
       projectGrid.appendChild(card);
     });
+  }
+
+  function deleteManualProject(projectId) {
+    const project = getProjectMeta(projectId);
+    if (!project || project.hasConfig) return;
+
+    if (!confirm('Delete manual project "' + project.name + '" and all its tasks?')) return;
+
+    delete appState.projects[projectId];
+    if (currentProjectId === projectId) {
+      currentProjectId = null;
+    }
+    appState.updatedAt = nowIso();
+    schedulePersist("Saving changes...");
+    renderHome();
+    showScreen("home");
   }
 
   function updateRefreshButtons(project) {
@@ -1122,14 +1155,7 @@
 
     getVisibleDates().forEach((dateKey) => {
       const stats = getDayStats(projectId, dateKey);
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "day-card";
-      if (dateKey === today) card.classList.add("today");
-      if (selectedTaskView === "day" && dateKey === selectedDate) card.classList.add("selected");
-      card.addEventListener("click", () => {
-        openDay(dateKey);
-      });
+      if (!stats.required && dateKey !== today) return;
 
       const title = document.createElement("div");
       title.className = "day-title";
@@ -1141,6 +1167,27 @@
 
       const metrics = document.createElement("div");
       metrics.className = "day-metrics";
+
+      if (!stats.required) {
+        const emptyCard = document.createElement("div");
+        emptyCard.className = "day-card today empty-day-card";
+        metrics.appendChild(document.createTextNode("No tasks due today"));
+        emptyCard.appendChild(title);
+        emptyCard.appendChild(date);
+        emptyCard.appendChild(metrics);
+        dayStrip.appendChild(emptyCard);
+        return;
+      }
+
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "day-card";
+      if (dateKey === today) card.classList.add("today");
+      if (selectedTaskView === "day" && dateKey === selectedDate) card.classList.add("selected");
+      card.addEventListener("click", () => {
+        openDay(dateKey);
+      });
+
       metrics.appendChild(document.createTextNode("Required: " + stats.required));
       metrics.appendChild(document.createElement("br"));
       metrics.appendChild(document.createTextNode("Complete: " + stats.complete));
