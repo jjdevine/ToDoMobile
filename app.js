@@ -1085,7 +1085,7 @@
       () => {
         openOverdue();
       },
-      "overdue-entry-card",
+      "overdue-entry-card" + (overdueTasks.length ? " has-overdue-tasks" : ""),
       selectedTaskView === "overdue"
     ));
 
