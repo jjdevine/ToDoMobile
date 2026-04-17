@@ -454,6 +454,14 @@ select {
   transition: border-color var(--transition), background var(--transition), transform var(--transition);
 }
 
+.empty-day-card {
+  cursor: default;
+}
+
+.empty-day-card:hover {
+  transform: none;
+}
+
 .day-card:hover {
   border-color: var(--accent);
   transform: translateY(-1px);
@@ -468,6 +476,11 @@ select {
 #project-screen .project-task-view-card:hover {
   border-color: rgba(190, 134, 77, 0.72);
   background: linear-gradient(180deg, rgba(92, 57, 30, 0.34), rgba(38, 29, 23, 0.98));
+}
+
+#project-screen .empty-day-card:hover {
+  border-color: var(--yellow);
+  background: linear-gradient(180deg, rgba(102, 83, 32, 0.34), rgba(39, 33, 19, 0.98));
 }
 
 #project-screen .day-card.selected,
