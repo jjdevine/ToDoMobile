@@ -622,6 +622,27 @@ select {
   gap: 0.85rem;
 }
 
+.task-list-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.2rem 0 0.85rem;
+}
+
+.task-list-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  user-select: none;
+}
+
+.task-list-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+
 .section-card {
   padding: 1rem;
 }
@@ -676,6 +697,18 @@ select {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.8rem;
+}
+
+.task-card.condensed {
+  padding: 0.68rem 0.85rem;
+}
+
+.task-card.condensed .task-card-title-row {
+  margin-bottom: 0.5rem;
+}
+
+.task-card.condensed .task-actions {
+  margin-top: 0;
 }
 
 .task-card h4 {
@@ -760,6 +793,11 @@ select {
 .task-btn.edit:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.task-btn.expand:hover {
+  border-color: var(--yellow);
+  color: var(--yellow);
 }
 
 .task-btn.delete:hover {
@@ -945,6 +983,10 @@ select {
 
   .project-create-actions {
     flex-direction: column;
+  }
+
+  .task-list-controls {
+    justify-content: flex-start;
   }
 
   .day-strip {

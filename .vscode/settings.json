@@ -1,0 +1,16 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^Get-Command node,npm,npx -ErrorAction SilentlyContinue \\| Select-Object Name,Source$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^where\\.exe node; where\\.exe npm$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Test-Path \"C:\\\\Program Files\\\\nodejs\\\\npm\\.cmd\"; Test-Path \"C:\\\\Program Files \\(x86\\)\\\\nodejs\\\\npm\\.cmd\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -61,6 +61,8 @@
   let currentProjectId = null;
   let selectedDate = todayKey();
   let selectedTaskView = "day";
+  let condensedMode = false;
+  let expandedTaskCards = {};
   let deferTaskId = null;
   let editTaskId = null;
   let pendingTaskCompletions = {};
@@ -1267,6 +1269,53 @@
     button.textContent = "View archive (" + stats.archived + ")";
   }
 
+  function getTaskExpandKey(task) {
+    return task.projectId + "::" + task.id;
+  }
+
+  function isTaskExpanded(task) {
+    return !!expandedTaskCards[getTaskExpandKey(task)];
+  }
+
+  function setTaskExpanded(task, expanded) {
+    const key = getTaskExpandKey(task);
+    if (expanded) {
+      expandedTaskCards[key] = true;
+      return;
+    }
+    delete expandedTaskCards[key];
+  }
+
+  function renderTaskListControls() {
+    const controls = $("#task-list-controls");
+    if (!controls) return;
+
+    controls.innerHTML = "";
+
+    const label = document.createElement("label");
+    label.className = "task-list-toggle";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = condensedMode;
+    input.addEventListener("change", () => {
+      condensedMode = input.checked;
+      if (!condensedMode) {
+        expandedTaskCards = {};
+      }
+      if (currentProjectId && $("#day-screen").classList.contains("active")) {
+        renderTaskSections(currentProjectId);
+      }
+    });
+
+    const text = document.createElement("span");
+    text.textContent = "Condensed mode";
+
+    label.appendChild(input);
+    label.appendChild(text);
+    controls.appendChild(label);
+  }
+
   function buildTaskMeta(task, archived) {
     const meta = document.createElement("div");
     meta.className = "task-meta";
@@ -1293,6 +1342,9 @@
     if (!task.dueDate) card.classList.add("nodate");
     const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
     if (pendingCompletion) card.classList.add("pending-completion");
+    const condensedCard = condensedMode && !options.archived && !pendingCompletion;
+    const expandedInCondensed = condensedCard ? isTaskExpanded(task) : false;
+    if (condensedCard && !expandedInCondensed) card.classList.add("condensed");
 
     const titleRow = document.createElement("div");
     titleRow.className = "task-card-title-row";
@@ -1303,6 +1355,35 @@
 
     card.appendChild(titleRow);
 
+    const actions = document.createElement("div");
+    actions.className = "task-actions";
+
+    if (condensedCard && !expandedInCondensed) {
+      const completeButton = document.createElement("button");
+      completeButton.type = "button";
+      completeButton.className = "task-btn complete";
+      completeButton.textContent = "Complete";
+      completeButton.addEventListener("click", () => {
+        completeTask(task.id);
+      });
+
+      const expandButton = document.createElement("button");
+      expandButton.type = "button";
+      expandButton.className = "task-btn expand";
+      expandButton.textContent = "Expand";
+      expandButton.addEventListener("click", () => {
+        setTaskExpanded(task, true);
+        if (currentProjectId) {
+          renderTaskSections(currentProjectId);
+        }
+      });
+
+      actions.appendChild(completeButton);
+      actions.appendChild(expandButton);
+      card.appendChild(actions);
+      return card;
+    }
+
     if (task.description) {
       const description = document.createElement("p");
       description.className = "task-description";
@@ -1311,9 +1392,6 @@
     }
 
     card.appendChild(buildTaskMeta(task, options.archived));
-
-    const actions = document.createElement("div");
-    actions.className = "task-actions";
 
     if (options.archived) {
       const deleteButton = document.createElement("button");
@@ -1373,6 +1451,20 @@
       actions.appendChild(deferButton);
       actions.appendChild(editButton);
       actions.appendChild(deleteButton);
+
+      if (condensedCard && expandedInCondensed) {
+        const collapseButton = document.createElement("button");
+        collapseButton.type = "button";
+        collapseButton.className = "task-btn expand";
+        collapseButton.textContent = "Collapse";
+        collapseButton.addEventListener("click", () => {
+          setTaskExpanded(task, false);
+          if (currentProjectId) {
+            renderTaskSections(currentProjectId);
+          }
+        });
+        actions.appendChild(collapseButton);
+      }
     }
 
     card.appendChild(actions);
@@ -1427,6 +1519,8 @@
   }
 
   function renderTaskSections(projectId) {
+    renderTaskListControls();
+
     const taskSections = $("#task-sections");
     taskSections.innerHTML = "";
 
@@ -1526,6 +1620,7 @@
     }
 
     updateArchiveButtonLabel();
+    renderTaskListControls();
     renderTaskSections(project.id);
     updateRefreshButtons(project);
     showScreen("day");
@@ -1832,10 +1927,6 @@
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
 
-    if (dueDate && compareDateKeys(dueDate, todayKey()) >= 0 && compareDateKeys(dueDate, addDays(todayKey(), 6)) <= 0) {
-      selectedDate = dueDate;
-    }
-
     closeEditModal();
     renderCurrentScreen();
   }
@@ -1887,7 +1978,6 @@
     task.updatedAt = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
-    selectedDate = nextDate;
     closeDeferModal();
     renderDayView();
   }
