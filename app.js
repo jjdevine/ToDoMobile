@@ -2275,6 +2275,11 @@
     $("#back-project-from-day-btn").addEventListener("click", () => {
       renderProject();
     });
+    $("#home-from-day-btn").addEventListener("click", () => {
+      currentProjectId = null;
+      renderHome();
+      showScreen("home");
+    });
     $("#open-day-add-task-btn").addEventListener("click", () => {
       openAddTaskModal();
     });
@@ -2284,6 +2289,11 @@
     $("#view-archive-btn").addEventListener("click", openArchive);
     $("#back-project-btn").addEventListener("click", () => {
       renderDayView();
+    });
+    $("#home-from-archive-btn").addEventListener("click", () => {
+      currentProjectId = null;
+      renderHome();
+      showScreen("home");
     });
     $("#download-archive-btn").addEventListener("click", downloadArchiveTasks);
     $("#delete-archive-btn").addEventListener("click", clearArchive);
