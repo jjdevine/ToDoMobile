@@ -31,6 +31,7 @@ Each project card shows:
 - Whether it is a recurring project or a manual project
 - Counts for active tasks, due today, overdue tasks, tasks with no due date, and archived tasks
 - Generation status for recurring projects, or a manual-project label for manual projects
+- A `☆ Set default` / `★ Default` button to configure a default project
 
 The home screen also provides:
 
@@ -38,6 +39,14 @@ The home screen also provides:
 - A `New Project` form for creating manual projects
 
 If there are no projects, the app explains that the user can either add a `.txt` file to `Projects/` and run `node build.js`, or create a manual project in the UI.
+
+## Default project
+
+Any project can be configured as the default project. When a default project is set, opening the app automatically navigates to the day view for today within that project, skipping the home screen.
+
+Each project card on the home screen has a `☆ Set default` button. Clicking it marks that project as the default. The button changes to `★ Default` for the active default project. Clicking `★ Default` clears the default so the app opens on the home screen as usual.
+
+The default project setting is stored as part of the app state and syncs across devices when Supabase sync is enabled.
 
 ## Recurring project generation
 
