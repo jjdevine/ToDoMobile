@@ -801,6 +801,12 @@ select {
   gap: 0.7rem;
 }
 
+.task-list.condensed {
+  gap: 0.3rem;
+}
+
+
+
 .task-card {
   padding: 0.9rem 1rem;
   background: linear-gradient(180deg, rgba(79, 49, 26, 0.28), rgba(30, 24, 21, 0.96));
@@ -836,15 +842,32 @@ select {
 }
 
 .task-card.condensed {
-  padding: 0.68rem 0.85rem;
+  padding: 0.4rem 0.6rem;
 }
 
 .task-card.condensed .task-card-title-row {
-  margin-bottom: 0.5rem;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.task-card.condensed .task-card-title-row h4 {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-card.condensed .task-actions {
   margin-top: 0;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+}
+
+.task-card.condensed .task-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
 }
 
 .task-card h4 {
