@@ -1573,7 +1573,7 @@
     }
 
     const list = document.createElement("div");
-    list.className = "task-list" + (condensedMode && !options.archived ? " condensed" : "");
+    list.className = `task-list${condensedMode && !options.archived ? " condensed" : ""}`;
     tasks.forEach((task) => {
       list.appendChild(buildTaskCard(task, options));
     });
