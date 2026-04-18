@@ -823,9 +823,9 @@
 
   function sortActiveTasks(tasks) {
     return tasks.slice().sort((a, b) => {
-      const pinnedA = a.pinned ? 0 : 1;
-      const pinnedB = b.pinned ? 0 : 1;
-      if (pinnedA !== pinnedB) return pinnedA - pinnedB;
+      const pinnedOrderA = a.pinned ? 0 : 1;
+      const pinnedOrderB = b.pinned ? 0 : 1;
+      if (pinnedOrderA !== pinnedOrderB) return pinnedOrderA - pinnedOrderB;
       const dueA = a.dueDate || "9999-12-31";
       const dueB = b.dueDate || "9999-12-31";
       if (dueA !== dueB) return compareDateKeys(dueA, dueB);
