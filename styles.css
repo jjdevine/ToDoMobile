@@ -856,6 +856,24 @@ select {
   color: var(--red);
 }
 
+.task-btn.pin:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.task-card.pinned {
+  border-color: rgba(108, 140, 255, 0.55);
+  box-shadow: inset 0 1px 0 rgba(214, 222, 255, 0.06), 0 0 0 1px rgba(108, 140, 255, 0.12);
+}
+
+.pin-badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .task-actions.pending-completion-actions {
   display: block;
 }
