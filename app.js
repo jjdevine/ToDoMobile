@@ -916,6 +916,21 @@
   }
 
   function showScreen(name) {
+    const splashEl = $("#splash-screen");
+
+    if (splashEl && splashEl.classList.contains("active") && name !== "splash") {
+      // Activate the target screen behind the splash, then fade splash out
+      $("#auth-screen").classList.toggle("active", name === "auth");
+      $("#home-screen").classList.toggle("active", name === "home");
+      $("#project-screen").classList.toggle("active", name === "project");
+      $("#day-screen").classList.toggle("active", name === "day");
+      $("#archive-screen").classList.toggle("active", name === "archive");
+      splashEl.classList.add("splash-hiding");
+      setTimeout(() => splashEl.classList.remove("active", "splash-hiding"), 480);
+      return;
+    }
+
+    if (splashEl) splashEl.classList.toggle("active", name === "splash");
     $("#auth-screen").classList.toggle("active", name === "auth");
     $("#home-screen").classList.toggle("active", name === "home");
     $("#project-screen").classList.toggle("active", name === "project");
@@ -2367,6 +2382,8 @@
       if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
         currentUser = sessionResponse.data.session.user;
         await enterApp();
+      } else {
+        showScreen("auth");
       }
 
       supabase.auth.onAuthStateChange((event, session) => {
