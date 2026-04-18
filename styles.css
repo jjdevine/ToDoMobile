@@ -805,8 +805,6 @@ select {
   gap: 0.3rem;
 }
 
-
-
 .task-card {
   padding: 0.9rem 1rem;
   background: linear-gradient(180deg, rgba(79, 49, 26, 0.28), rgba(30, 24, 21, 0.96));
