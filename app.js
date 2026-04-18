@@ -2338,8 +2338,6 @@
 
   async function enterApp() {
     if (appEntered) {
-      renderHome();
-      showScreen("home");
       return;
     }
 
