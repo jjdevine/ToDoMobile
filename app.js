@@ -1446,7 +1446,7 @@
       actions.appendChild(completeButton);
       actions.appendChild(pinButton);
       actions.appendChild(expandButton);
-      titleRow.appendChild(actions);
+      card.appendChild(actions);
       return card;
     }
 
