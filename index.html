@@ -201,8 +201,14 @@
           });
       });
 
+      // Only reload when a *new* service worker takes over an existing one (genuine
+      // update).  If there was no previous controller the SW is simply claiming the
+      // page for the first time, and reloading would cause the double-splash issue.
+      const hadController = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.addEventListener("controllerchange", () => {
-        window.location.reload();
+        if (hadController) {
+          window.location.reload();
+        }
       });
     }
   </script>
