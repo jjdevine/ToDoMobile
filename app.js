@@ -80,6 +80,7 @@
       version: 1,
       updatedAt: nowIso(),
       projects: {},
+      defaultProjectId: null,
     };
   }
 
@@ -292,6 +293,7 @@
     normalized.version = Number(rawState.version) || 1;
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
+    normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
 
     if (isPlainObject(rawState.projects)) {
       Object.keys(rawState.projects).forEach((projectId) => {
@@ -398,6 +400,7 @@
     });
 
     merged.updatedAt = laterIso(local.updatedAt, remote.updatedAt);
+    merged.defaultProjectId = compareIso(local.updatedAt, remote.updatedAt) >= 0 ? local.defaultProjectId : remote.defaultProjectId;
     return normalizeState(merged);
   }
 
@@ -959,8 +962,9 @@
     projects.forEach((project) => {
       const stats = buildProjectStats(project.id);
       const projectState = ensureProjectState(project.id, project.name);
+      const isDefault = appState.defaultProjectId === project.id;
       const card = document.createElement("div");
-      card.className = "project-card";
+      card.className = "project-card" + (isDefault ? " project-card-default" : "");
       card.addEventListener("click", () => {
         openProject(project.id);
       });
@@ -976,6 +980,21 @@
       const topRowActions = document.createElement("div");
       topRowActions.className = "project-card-top-actions";
       topRowActions.appendChild(createChip("active", String(stats.active)));
+
+      const defaultButton = document.createElement("button");
+      defaultButton.type = "button";
+      defaultButton.className = isDefault ? "project-card-default-btn project-card-default-btn-active" : "project-card-default-btn";
+      defaultButton.textContent = isDefault ? "★ Default" : "☆ Set default";
+      defaultButton.title = isDefault ? "This is your default project. Click to clear." : "Open this project's today view on app start.";
+      defaultButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (isDefault) {
+          clearDefaultProject();
+        } else {
+          setDefaultProject(project.id);
+        }
+      });
+      topRowActions.appendChild(defaultButton);
 
       if (!project.hasConfig) {
         const deleteButton = document.createElement("button");
@@ -1024,10 +1043,27 @@
     if (currentProjectId === projectId) {
       currentProjectId = null;
     }
+    if (appState.defaultProjectId === projectId) {
+      appState.defaultProjectId = null;
+    }
     appState.updatedAt = nowIso();
     schedulePersist("Saving changes...");
     renderHome();
     showScreen("home");
+  }
+
+  function setDefaultProject(projectId) {
+    appState.defaultProjectId = projectId;
+    appState.updatedAt = nowIso();
+    schedulePersist("Default project saved.");
+    renderHome();
+  }
+
+  function clearDefaultProject() {
+    appState.defaultProjectId = null;
+    appState.updatedAt = nowIso();
+    schedulePersist("Default project cleared.");
+    renderHome();
   }
 
   function updateRefreshButtons(project) {
@@ -2261,8 +2297,16 @@
     const generation = generateTasksForAllProjects();
 
     showUserBar();
-    renderHome();
-    showScreen("home");
+
+    const defaultId = appState.defaultProjectId;
+    if (defaultId && getProjectMeta(defaultId)) {
+      currentProjectId = defaultId;
+      renderHome();
+      openDay(todayKey());
+    } else {
+      renderHome();
+      showScreen("home");
+    }
 
     if (stateChanged || generation.changed) {
       schedulePersist(generation.created ? "Generated " + generation.created + " new task" + (generation.created === 1 ? "" : "s") + "." : "Saving changes...");
