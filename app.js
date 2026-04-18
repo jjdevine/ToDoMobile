@@ -1446,7 +1446,7 @@
       actions.appendChild(completeButton);
       actions.appendChild(pinButton);
       actions.appendChild(expandButton);
-      card.appendChild(actions);
+      titleRow.appendChild(actions);
       return card;
     }
 
@@ -1573,7 +1573,7 @@
     }
 
     const list = document.createElement("div");
-    list.className = "task-list";
+    list.className = `task-list${condensedMode && !options.archived ? " condensed" : ""}`;
     tasks.forEach((task) => {
       list.appendChild(buildTaskCard(task, options));
     });
