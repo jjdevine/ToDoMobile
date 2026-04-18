@@ -209,6 +209,7 @@
       createdAt,
       updatedAt,
       completedAt,
+      pinned: typeof raw.pinned === "boolean" ? raw.pinned : false,
     };
   }
 
@@ -822,6 +823,9 @@
 
   function sortActiveTasks(tasks) {
     return tasks.slice().sort((a, b) => {
+      const pinnedOrderA = a.pinned ? 0 : 1;
+      const pinnedOrderB = b.pinned ? 0 : 1;
+      if (pinnedOrderA !== pinnedOrderB) return pinnedOrderA - pinnedOrderB;
       const dueA = a.dueDate || "9999-12-31";
       const dueB = b.dueDate || "9999-12-31";
       if (dueA !== dueB) return compareDateKeys(dueA, dueB);
@@ -1370,6 +1374,7 @@
     card.className = "task-card";
     if (options.overdue) card.classList.add("overdue");
     if (!task.dueDate) card.classList.add("nodate");
+    if (!options.archived && task.pinned) card.classList.add("pinned");
     const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
     if (pendingCompletion) card.classList.add("pending-completion");
     const condensedCard = condensedMode && !options.archived && !pendingCompletion;
@@ -1382,6 +1387,13 @@
     const title = document.createElement("h4");
     title.textContent = task.name;
     titleRow.appendChild(title);
+
+    if (!options.archived && task.pinned) {
+      const pinBadge = document.createElement("span");
+      pinBadge.className = "pin-badge";
+      pinBadge.textContent = "📌 Pinned";
+      titleRow.appendChild(pinBadge);
+    }
 
     card.appendChild(titleRow);
 
@@ -1397,6 +1409,14 @@
         completeTask(task.id);
       });
 
+      const pinButton = document.createElement("button");
+      pinButton.type = "button";
+      pinButton.className = "task-btn pin";
+      pinButton.textContent = task.pinned ? "Unpin" : "Pin";
+      pinButton.addEventListener("click", () => {
+        togglePinTask(task.id);
+      });
+
       const expandButton = document.createElement("button");
       expandButton.type = "button";
       expandButton.className = "task-btn expand";
@@ -1409,6 +1429,7 @@
       });
 
       actions.appendChild(completeButton);
+      actions.appendChild(pinButton);
       actions.appendChild(expandButton);
       card.appendChild(actions);
       return card;
@@ -1481,6 +1502,15 @@
       actions.appendChild(deferButton);
       actions.appendChild(editButton);
       actions.appendChild(deleteButton);
+
+      const pinButton = document.createElement("button");
+      pinButton.type = "button";
+      pinButton.className = "task-btn pin";
+      pinButton.textContent = task.pinned ? "Unpin" : "Pin";
+      pinButton.addEventListener("click", () => {
+        togglePinTask(task.id);
+      });
+      actions.appendChild(pinButton);
 
       if (condensedCard && expandedInCondensed) {
         const collapseButton = document.createElement("button");
@@ -2010,6 +2040,20 @@
     schedulePersist("Saving changes...");
     closeDeferModal();
     renderDayView();
+  }
+
+  function togglePinTask(taskId) {
+    if (!currentProjectId) return;
+    const projectState = ensureProjectState(currentProjectId, "");
+    const task = projectState.tasks[taskId];
+    if (!task) return;
+
+    const timestamp = nowIso();
+    task.pinned = !task.pinned;
+    task.updatedAt = timestamp;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
   }
 
   function hardDeleteTask(taskId) {
