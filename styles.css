@@ -844,23 +844,11 @@ select {
 }
 
 .task-card.condensed .task-card-title-row {
-  align-items: center;
-  margin-bottom: 0;
-}
-
-.task-card.condensed .task-card-title-row h4 {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-bottom: 0.3rem;
 }
 
 .task-card.condensed .task-actions {
   margin-top: 0;
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-  gap: 0.3rem;
 }
 
 .task-card.condensed .task-btn {
