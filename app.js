@@ -2011,16 +2011,13 @@
     // value arrives, then restore it and focus.
     if (currentUser && supabase) {
       const descriptionEl = $("#edit-task-description-input");
+      const editingId = taskId; // captured before the await for stale-check
       descriptionEl.disabled = true;
       const cloudBody = await fetchTaskDescription(taskId);
-      // Only update if still editing the same task (modal not yet closed)
-      if (editTaskId === taskId) {
-        descriptionEl.disabled = false;
-        if (cloudBody !== null) {
-          descriptionEl.value = cloudBody;
-        }
-      } else {
-        descriptionEl.disabled = false;
+      descriptionEl.disabled = false;
+      // Only overwrite if still editing the same task (modal not closed/changed)
+      if (editTaskId === editingId && cloudBody !== null) {
+        descriptionEl.value = cloudBody;
       }
     }
   }
