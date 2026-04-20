@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "task_planner_state_v1";
   const TABLE_NAME = "todo_state";
+  const DESCRIPTIONS_TABLE = "task_descriptions";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
@@ -526,6 +527,62 @@
     renderCurrentScreen();
     setSyncStatus("Sync complete.");
   }
+
+  // --- Task description API (task_descriptions table) ---
+
+  async function fetchTaskDescription(taskId) {
+    if (!supabase || !currentUser) return null;
+    try {
+      const { data, error } = await supabase
+        .from(DESCRIPTIONS_TABLE)
+        .select("body")
+        .eq("task_id", taskId)
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+      if (error) {
+        console.warn("Failed to fetch task description:", error.message);
+        return null;
+      }
+      return data ? data.body : null;
+    } catch (error) {
+      console.warn("Failed to fetch task description:", error);
+      return null;
+    }
+  }
+
+  async function upsertTaskDescription(taskId, body) {
+    if (!supabase || !currentUser) return;
+    try {
+      const { error } = await supabase.from(DESCRIPTIONS_TABLE).upsert({
+        task_id: taskId,
+        user_id: currentUser.id,
+        body,
+      });
+      if (error) {
+        console.warn("Failed to save task description:", error.message);
+      }
+    } catch (error) {
+      console.warn("Failed to save task description:", error);
+    }
+  }
+
+  async function deleteTaskDescription(taskId) {
+    if (!supabase || !currentUser) return;
+    try {
+      const { error } = await supabase
+        .from(DESCRIPTIONS_TABLE)
+        .delete()
+        .eq("task_id", taskId)
+        .eq("user_id", currentUser.id);
+      if (error) {
+        console.warn("Failed to delete task description:", error.message);
+      }
+    } catch (error) {
+      console.warn("Failed to delete task description:", error);
+    }
+  }
+
+  // --------------------------------------------------------
 
   function createId(prefix) {
     return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
@@ -1821,6 +1878,12 @@
     }
 
     renderCurrentScreen();
+
+    // Persist the long description to the dedicated cloud table (fire-and-forget).
+    // Always upsert so that a subsequent edit that clears the description is
+    // guaranteed to have a row to update rather than leaving stale data.
+    upsertTaskDescription(taskId, description);
+
     return true;
   }
 
@@ -1931,7 +1994,7 @@
     renderCurrentScreen();
   }
 
-  function openEditModal(taskId) {
+  async function openEditModal(taskId) {
     const task = getActiveTask(taskId);
     if (!task) return;
 
@@ -1942,6 +2005,24 @@
     $("#edit-task-date-input").value = task.dueDate || "";
     $("#edit-modal").classList.remove("hidden");
     $("#edit-modal").setAttribute("aria-hidden", "false");
+
+    // Fetch the authoritative long description from the cloud table.
+    // Disable the textarea briefly so the user doesn't type before the
+    // value arrives, then restore it and focus.
+    if (currentUser && supabase) {
+      const descriptionEl = $("#edit-task-description-input");
+      descriptionEl.disabled = true;
+      const cloudBody = await fetchTaskDescription(taskId);
+      // Only update if still editing the same task (modal not yet closed)
+      if (editTaskId === taskId) {
+        descriptionEl.disabled = false;
+        if (cloudBody !== null) {
+          descriptionEl.value = cloudBody;
+        }
+      } else {
+        descriptionEl.disabled = false;
+      }
+    }
   }
 
   function closeEditModal() {
@@ -1994,6 +2075,7 @@
     const dueDate = isDateKey(dueDateValue) ? dueDateValue : null;
     if (!name) return;
 
+    const savedTaskId = editTaskId;
     const timestamp = nowIso();
     task.name = name;
     task.description = description;
@@ -2004,6 +2086,9 @@
 
     closeEditModal();
     renderCurrentScreen();
+
+    // Persist the long description to the dedicated cloud table (fire-and-forget).
+    upsertTaskDescription(savedTaskId, description);
   }
 
   function populateDeferSelect() {
@@ -2085,6 +2170,9 @@
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderCurrentScreen();
+
+    // Remove the cloud description for this task (fire-and-forget).
+    deleteTaskDescription(taskId);
   }
 
   function deleteArchivedTask(taskId) {
@@ -2101,6 +2189,9 @@
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderArchiveScreen();
+
+    // Remove the cloud description for this task (fire-and-forget).
+    deleteTaskDescription(taskId);
   }
 
   function clearArchive() {
@@ -2115,6 +2206,8 @@
     archiveIds.forEach((taskId) => {
       delete projectState.archived[taskId];
       projectState.deletedArchiveIds[taskId] = timestamp;
+      // Remove the cloud description for each deleted task (fire-and-forget).
+      deleteTaskDescription(taskId);
     });
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
