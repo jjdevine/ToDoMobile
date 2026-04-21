@@ -585,6 +585,13 @@ select {
   border-style: dashed;
 }
 
+.project-task-view-empty-label {
+  font-style: italic;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 0 0.2rem;
+}
+
 .day-card {
   padding: 0.8rem;
   cursor: pointer;
