@@ -1081,6 +1081,15 @@ select {
   padding: 1rem;
 }
 
+/* The edit-task modal needs more width to comfortably display a long description. */
+#edit-modal .modal-card {
+  width: min(100%, 560px);
+}
+
+#edit-task-description-input {
+  max-height: 40vh;
+}
+
 .modal-text {
   margin-top: 0.35rem;
   margin-bottom: 0.9rem;
