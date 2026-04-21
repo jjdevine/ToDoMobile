@@ -1236,33 +1236,43 @@
       .filter(Boolean)
       .sort(compareDateKeys)[0];
 
-    container.appendChild(buildProjectTaskViewCard(
-      "Overdue",
-      overdueTasks.length
-        ? overdueTasks.length + " overdue task" + (overdueTasks.length === 1 ? "" : "s")
-        : "No overdue tasks",
-      oldestDueDate
-        ? "Open overdue task list · Oldest due: " + formatDatePill(oldestDueDate)
-        : "Open overdue task list",
-      () => {
-        openOverdue();
-      },
-      "overdue-entry-card" + (overdueTasks.length ? " has-overdue-tasks" : ""),
-      selectedTaskView === "overdue"
-    ));
+    if (overdueTasks.length) {
+      container.appendChild(buildProjectTaskViewCard(
+        "Overdue",
+        overdueTasks.length + " overdue task" + (overdueTasks.length === 1 ? "" : "s"),
+        oldestDueDate
+          ? "Open overdue task list · Oldest due: " + formatDatePill(oldestDueDate)
+          : "Open overdue task list",
+        () => {
+          openOverdue();
+        },
+        "overdue-entry-card has-overdue-tasks",
+        selectedTaskView === "overdue"
+      ));
+    } else {
+      const noOverdueLabel = document.createElement("p");
+      noOverdueLabel.className = "project-task-view-empty-label";
+      noOverdueLabel.textContent = "no overdue tasks";
+      container.appendChild(noOverdueLabel);
+    }
 
-    container.appendChild(buildProjectTaskViewCard(
-      "No Due Date",
-      noDateTasks.length
-        ? noDateTasks.length + " task" + (noDateTasks.length === 1 ? "" : "s") + " with no due date"
-        : "No tasks without a due date",
-      "Open no due date task list",
-      () => {
-        openNoDueDate();
-      },
-      "nodate-entry-card",
-      selectedTaskView === "nodate"
-    ));
+    if (noDateTasks.length) {
+      container.appendChild(buildProjectTaskViewCard(
+        "No Due Date",
+        noDateTasks.length + " task" + (noDateTasks.length === 1 ? "" : "s") + " with no due date",
+        "Open no due date task list",
+        () => {
+          openNoDueDate();
+        },
+        "nodate-entry-card",
+        selectedTaskView === "nodate"
+      ));
+    } else {
+      const noDateLabel = document.createElement("p");
+      noDateLabel.className = "project-task-view-empty-label";
+      noDateLabel.textContent = "no tasks without a due date";
+      container.appendChild(noDateLabel);
+    }
 
     container.appendChild(buildProjectTaskViewCard(
       "All Tasks",
