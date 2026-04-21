@@ -1702,8 +1702,15 @@
     if (selectedTaskView === "all") {
       const today = todayKey();
       const allTasks = sortActiveTasks(getProjectTasks(projectId));
-      const overdueAll = allTasks.filter((task) => task.dueDate && compareDateKeys(task.dueDate, today) < 0);
-      const restAll = allTasks.filter((task) => !task.dueDate || compareDateKeys(task.dueDate, today) >= 0);
+      const overdueAll = [];
+      const restAll = [];
+      allTasks.forEach((task) => {
+        if (task.dueDate && compareDateKeys(task.dueDate, today) < 0) {
+          overdueAll.push(task);
+        } else {
+          restAll.push(task);
+        }
+      });
       if (overdueAll.length) {
         taskSections.appendChild(buildTaskSection("Overdue", overdueAll, {
           overdue: true,
