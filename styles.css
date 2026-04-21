@@ -1090,6 +1090,40 @@ select {
   max-height: 40vh;
 }
 
+/* The config modal needs extra width for the textarea and a tall textarea. */
+.modal-card-wide {
+  width: min(100%, 640px);
+}
+
+#config-modal-textarea {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+  min-height: 16rem;
+  max-height: 55vh;
+  resize: vertical;
+}
+
+.config-upload-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.config-upload-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.config-file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .modal-text {
   margin-top: 0.35rem;
   margin-bottom: 0.9rem;
