@@ -3,6 +3,8 @@
 
   const STORAGE_KEY = "task_planner_state_v1";
   const TABLE_NAME = "todo_state";
+  const TASK_DESCRIPTIONS_TABLE = "task_descriptions";
+  const MIGRATION_DESCRIPTIONS_KEY = "task_planner_descriptions_migrated_v1";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
@@ -198,11 +200,11 @@
     const dueDate = isDateKey(raw.dueDate) ? raw.dueDate : null;
     const source = raw.source === "generated" ? "generated" : "manual";
 
-    return {
+    const legacyDescription = String(raw.description || "").trim();
+    const record = {
       id,
       projectId: typeof raw.projectId === "string" && raw.projectId ? raw.projectId : projectId,
       name: String(raw.name || "").trim(),
-      description: String(raw.description || "").trim(),
       dueDate,
       source,
       generatedKey: typeof raw.generatedKey === "string" && raw.generatedKey ? raw.generatedKey : null,
@@ -211,6 +213,10 @@
       completedAt,
       pinned: typeof raw.pinned === "boolean" ? raw.pinned : false,
     };
+    if (legacyDescription) {
+      record.description = legacyDescription;
+    }
+    return record;
   }
 
   function normalizeTaskMap(rawMap, projectId, archived) {
@@ -460,6 +466,135 @@
     clearTimeout(saveTimer);
     saveTimer = null;
     saveStateLocal();
+  }
+
+  async function fetchTaskDescription(taskId) {
+    if (!supabase || !currentUser) return null;
+    try {
+      const { data, error } = await supabase
+        .from(TASK_DESCRIPTIONS_TABLE)
+        .select("body")
+        .eq("task_id", taskId)
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+      if (error) {
+        console.error("fetchTaskDescription error:", error.message);
+        return null;
+      }
+      return data ? data.body : null;
+    } catch (err) {
+      console.error("fetchTaskDescription exception:", err);
+      return null;
+    }
+  }
+
+  async function upsertTaskDescription(taskId, body) {
+    if (!supabase || !currentUser) return false;
+    try {
+      const { error } = await supabase.from(TASK_DESCRIPTIONS_TABLE).upsert({
+        task_id: taskId,
+        user_id: currentUser.id,
+        body,
+      });
+      if (error) {
+        console.error("upsertTaskDescription error:", error.message);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("upsertTaskDescription exception:", err);
+      return false;
+    }
+  }
+
+  async function deleteTaskDescription(taskId) {
+    if (!supabase || !currentUser) return;
+    try {
+      const { error } = await supabase
+        .from(TASK_DESCRIPTIONS_TABLE)
+        .delete()
+        .eq("task_id", taskId)
+        .eq("user_id", currentUser.id);
+      if (error) {
+        console.error("deleteTaskDescription error:", error.message);
+      }
+    } catch (err) {
+      console.error("deleteTaskDescription exception:", err);
+    }
+  }
+
+  async function deleteTaskDescriptions(taskIds) {
+    if (!supabase || !currentUser || !taskIds.length) return;
+    try {
+      const { error } = await supabase
+        .from(TASK_DESCRIPTIONS_TABLE)
+        .delete()
+        .in("task_id", taskIds)
+        .eq("user_id", currentUser.id);
+      if (error) {
+        console.error("deleteTaskDescriptions error:", error.message);
+      }
+    } catch (err) {
+      console.error("deleteTaskDescriptions exception:", err);
+    }
+  }
+
+  async function migrateDescriptionsToSupabase() {
+    if (!supabase || !currentUser) return;
+
+    if (localStorage.getItem(MIGRATION_DESCRIPTIONS_KEY) === currentUser.id) return;
+
+    const tasks = [];
+    Object.values(appState.projects).forEach((projectState) => {
+      if (!isPlainObject(projectState)) return;
+      if (isPlainObject(projectState.tasks)) {
+        Object.values(projectState.tasks).forEach((task) => {
+          if (task && task.id && typeof task.description === "string" && task.description.trim()) {
+            tasks.push(task);
+          }
+        });
+      }
+      if (isPlainObject(projectState.archived)) {
+        Object.values(projectState.archived).forEach((task) => {
+          if (task && task.id && typeof task.description === "string" && task.description.trim()) {
+            tasks.push(task);
+          }
+        });
+      }
+    });
+
+    if (!tasks.length) {
+      localStorage.setItem(MIGRATION_DESCRIPTIONS_KEY, currentUser.id);
+      return;
+    }
+
+    const CONCURRENCY = 3;
+    let index = 0;
+    let stateChanged = false;
+
+    async function runNext() {
+      if (index >= tasks.length) return;
+      const task = tasks[index++];
+      const ok = await upsertTaskDescription(task.id, task.description.trim());
+      if (ok) {
+        delete task.description;
+        stateChanged = true;
+      }
+      await runNext();
+    }
+
+    const workers = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, tasks.length); i++) {
+      workers.push(runNext());
+    }
+    await Promise.all(workers);
+
+    if (stateChanged) {
+      saveStateLocal();
+      await pushState();
+    }
+
+    localStorage.setItem(MIGRATION_DESCRIPTIONS_KEY, currentUser.id);
   }
 
   async function pushState() {
@@ -767,7 +902,6 @@
           id: taskId,
           projectId,
           name: rule.name,
-          description: "",
           dueDate: dateKey,
           source: "generated",
           generatedKey,
@@ -1801,7 +1935,6 @@
       id: taskId,
       projectId: currentProjectId,
       name,
-      description,
       dueDate,
       source: "manual",
       generatedKey: null,
@@ -1812,6 +1945,10 @@
 
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
+
+    if (description) {
+      upsertTaskDescription(taskId, description);
+    }
 
     nameInput.value = "";
     descriptionInput.value = "";
@@ -1931,7 +2068,7 @@
     renderCurrentScreen();
   }
 
-  function openEditModal(taskId) {
+  async function openEditModal(taskId) {
     const task = getActiveTask(taskId);
     if (!task) return;
 
@@ -1942,6 +2079,12 @@
     $("#edit-task-date-input").value = task.dueDate || "";
     $("#edit-modal").classList.remove("hidden");
     $("#edit-modal").setAttribute("aria-hidden", "false");
+
+    const editingId = taskId;
+    const cloudBody = await fetchTaskDescription(taskId);
+    if (editTaskId === editingId && cloudBody !== null) {
+      $("#edit-task-description-input").value = cloudBody;
+    }
   }
 
   function closeEditModal() {
@@ -1977,7 +2120,7 @@
     closeAddTaskModal();
   }
 
-  function saveEditedTask(event) {
+  async function saveEditedTask(event) {
     event.preventDefault();
     if (!currentProjectId || !editTaskId) return;
 
@@ -1988,6 +2131,7 @@
       return;
     }
 
+    const savedTaskId = editTaskId;
     const name = $("#edit-task-name-input").value.trim();
     const description = $("#edit-task-description-input").value.trim();
     const dueDateValue = $("#edit-task-date-input").value;
@@ -1996,11 +2140,13 @@
 
     const timestamp = nowIso();
     task.name = name;
-    task.description = description;
+    delete task.description;
     task.dueDate = dueDate;
     task.updatedAt = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
+
+    await upsertTaskDescription(savedTaskId, description);
 
     closeEditModal();
     renderCurrentScreen();
@@ -2084,6 +2230,7 @@
     projectState.deletedTaskIds[taskId] = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
+    deleteTaskDescription(taskId);
     renderCurrentScreen();
   }
 
@@ -2100,6 +2247,7 @@
     projectState.deletedArchiveIds[taskId] = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
+    deleteTaskDescription(taskId);
     renderArchiveScreen();
   }
 
@@ -2118,6 +2266,7 @@
     });
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
+    deleteTaskDescriptions(archiveIds);
     renderArchiveScreen();
   }
 
@@ -2358,6 +2507,7 @@
 
     if (currentUser) {
       await pullState();
+      await migrateDescriptionsToSupabase();
     }
 
     const stateChanged = ensureManifestProjectsInState();
