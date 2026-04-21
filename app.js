@@ -779,7 +779,7 @@
     };
   }
 
-  function buildManualProjectId(name) {
+  function buildProjectId(name) {
     const slug = String(name || "")
       .trim()
       .toLowerCase()
@@ -1083,17 +1083,15 @@
       });
       topRowActions.appendChild(defaultButton);
 
-      if (true) {
-        const deleteButton = document.createElement("button");
-        deleteButton.type = "button";
-        deleteButton.className = "project-card-delete";
-        deleteButton.textContent = "Delete";
-        deleteButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteProject(project.id);
-        });
-        topRowActions.appendChild(deleteButton);
-      }
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "project-card-delete";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteProject(project.id);
+      });
+      topRowActions.appendChild(deleteButton);
 
       topRow.appendChild(topRowActions);
 
@@ -1997,7 +1995,7 @@
       return;
     }
 
-    const projectId = buildManualProjectId(name);
+    const projectId = buildProjectId(name);
     const projectState = ensureProjectState(projectId, name);
     touchProject(projectState);
     schedulePersist("Saving changes...");
@@ -2006,29 +2004,7 @@
     openProject(projectId);
   }
 
-  function createManualProject(event) {
-    event.preventDefault();
 
-    const nameInput = $("#create-project-name-input");
-    const name = nameInput.value.trim();
-    if (!name) return;
-
-    const existingProject = getAllProjects().find((project) => project.name.toLowerCase() === name.toLowerCase());
-    if (existingProject) {
-      setSyncStatus('A project named "' + name + '" already exists.');
-      nameInput.focus();
-      nameInput.select();
-      return;
-    }
-
-    const projectId = buildManualProjectId(name);
-    const projectState = ensureProjectState(projectId, name);
-    touchProject(projectState);
-    schedulePersist("Saving changes...");
-    nameInput.value = "";
-    closeCreateProjectPanel();
-    openProject(projectId);
-  }
 
   // --- Project configuration modal ---
 
