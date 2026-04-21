@@ -1111,6 +1111,33 @@ select {
   margin-top: 0.9rem;
 }
 
+.defer-date-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.defer-date-btn {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.defer-date-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .date-quick-actions {
   display: flex;
   flex-wrap: wrap;
