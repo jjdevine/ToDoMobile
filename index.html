@@ -42,7 +42,7 @@
     <div id="home-screen" class="screen">
       <header class="app-header">
         <h1>Task Planner</h1>
-        <p class="subtitle">Projects generated from text files, with manual tasks and archives</p>
+        <p class="subtitle">Projects with recurring tasks and manual tasks</p>
         <div id="user-bar" class="user-bar hidden">
           <span id="user-email" class="user-email"></span>
           <button id="sync-now-btn" class="btn-sync" title="Sync now">&#x21BB;</button>
@@ -59,7 +59,7 @@
       <section id="create-project-panel" class="panel create-project-panel hidden">
         <div class="panel-heading">
           <h3>New Project</h3>
-          <p class="subtitle">Create a project with your own tasks only, with no matching `.txt` file required.</p>
+          <p class="subtitle">Create a project and then add a recurring configuration from the project screen, or leave it manual.</p>
         </div>
         <form id="create-project-form" class="project-create-form">
           <input type="text" id="create-project-name-input" placeholder="Project name" required maxlength="120">
@@ -72,7 +72,7 @@
 
       <div id="project-grid" class="project-grid"></div>
       <div id="home-empty" class="empty-state hidden">
-        No projects yet. Add a `.txt` file to `Projects/` and run `node build.js`, or create a manual project above.
+        No projects yet. Use "Create project" to get started, then add a recurring configuration from the project screen.
       </div>
     </div>
 
@@ -87,6 +87,7 @@
 
       <div class="project-actions">
         <button id="open-project-add-task-btn" class="btn-secondary">Add task</button>
+        <button id="open-project-configure-btn" class="btn-secondary">Configure</button>
         <button id="refresh-project-btn" class="btn-primary">Refresh tasks</button>
       </div>
 
@@ -200,6 +201,27 @@
       </form>
     </div>
   </div>
+
+  <div id="config-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-card-wide">
+      <h3>Project Configuration</h3>
+      <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-weekly-monday,friday</code> or <code>task name-monthly-1</code>. Lines starting with <code>#</code> are comments.</p>
+      <form id="config-form" class="task-form">
+        <div class="config-upload-row">
+          <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
+          <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
+        </div>
+        <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;# This is a comment" rows="14" spellcheck="false"></textarea>
+        <p id="config-modal-error" class="auth-error hidden"></p>
+        <div class="modal-actions">
+          <button id="clear-config-btn" type="button" class="btn-danger">Clear config</button>
+          <button id="cancel-config-btn" type="button" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Save config</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="supabase-config.js"></script>
