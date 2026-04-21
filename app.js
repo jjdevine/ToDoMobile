@@ -1216,6 +1216,7 @@
     const taskBuckets = getTaskBuckets(projectId, todayKey());
     const overdueTasks = taskBuckets.overdue;
     const noDateTasks = taskBuckets.noDate;
+    const allTasks = sortActiveTasks(getProjectTasks(projectId));
     const oldestDueDate = overdueTasks
       .map((task) => task.dueDate)
       .filter(Boolean)
@@ -1247,6 +1248,19 @@
       },
       "nodate-entry-card",
       selectedTaskView === "nodate"
+    ));
+
+    container.appendChild(buildProjectTaskViewCard(
+      "All Tasks",
+      allTasks.length
+        ? allTasks.length + " task" + (allTasks.length === 1 ? "" : "s") + " in this project"
+        : "No tasks in this project",
+      "View all tasks sorted by due date",
+      () => {
+        openAllTasks();
+      },
+      "all-tasks-entry-card",
+      selectedTaskView === "all"
     ));
   }
 
@@ -1685,6 +1699,33 @@
       return;
     }
 
+    if (selectedTaskView === "all") {
+      const today = todayKey();
+      const allTasks = sortActiveTasks(getProjectTasks(projectId));
+      const overdueAll = [];
+      const restAll = [];
+      allTasks.forEach((task) => {
+        if (task.dueDate && compareDateKeys(task.dueDate, today) < 0) {
+          overdueAll.push(task);
+        } else {
+          restAll.push(task);
+        }
+      });
+      if (overdueAll.length) {
+        taskSections.appendChild(buildTaskSection("Overdue", overdueAll, {
+          overdue: true,
+          archived: false,
+          emptyMessage: "",
+        }));
+      }
+      taskSections.appendChild(buildTaskSection("Upcoming & Undated", restAll, {
+        overdue: false,
+        archived: false,
+        emptyMessage: "No upcoming tasks.",
+      }));
+      return;
+    }
+
     taskSections.appendChild(buildTaskSection(formatDateLong(selectedDate), taskBuckets.selected, {
       overdue: false,
       archived: false,
@@ -1745,6 +1786,10 @@
       const futureCount = getTaskBuckets(project.id, selectedDate).future.length;
       $("#day-title").textContent = "Other Future Tasks";
       $("#day-subtitle").textContent = project.name + " · " + futureCount + " task" + (futureCount === 1 ? "" : "s") + " beyond the next 7 days";
+    } else if (selectedTaskView === "all") {
+      const allCount = getProjectTasks(project.id).length;
+      $("#day-title").textContent = "All Tasks";
+      $("#day-subtitle").textContent = project.name + " · " + allCount + " task" + (allCount === 1 ? "" : "s");
     } else {
       const stats = getDayStats(project.id, selectedDate);
       $("#day-title").textContent = formatDateLong(selectedDate);
@@ -1820,6 +1865,11 @@
 
   function openNoDueDate() {
     selectedTaskView = "nodate";
+    renderDayView();
+  }
+
+  function openAllTasks() {
+    selectedTaskView = "all";
     renderDayView();
   }
 
@@ -2394,6 +2444,24 @@
     $("#confirm-defer-btn").addEventListener("click", confirmDeferTask);
     $("#cancel-edit-btn").addEventListener("click", closeEditModal);
     $("#edit-task-form").addEventListener("submit", saveEditedTask);
+
+    document.querySelectorAll(".date-quick-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.dataset.target;
+        const action = btn.dataset.action;
+        const input = document.getElementById(targetId);
+        if (!input) return;
+        if (action === "clear") {
+          input.value = "";
+        } else if (action === "today") {
+          input.value = todayKey();
+        } else if (action === "tomorrow") {
+          input.value = addDays(todayKey(), 1);
+        } else if (action === "in7days") {
+          input.value = addDays(todayKey(), 7);
+        }
+      });
+    });
     $("#add-task-modal").addEventListener("click", (event) => {
       if (event.target === $("#add-task-modal")) {
         closeAddTaskModal();

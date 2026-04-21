@@ -166,6 +166,12 @@
         <input type="text" id="edit-task-name-input" placeholder="Task name" required maxlength="120">
         <textarea id="edit-task-description-input" placeholder="Description (optional)" rows="6"></textarea>
         <input type="date" id="edit-task-date-input">
+        <div class="date-quick-actions">
+          <button type="button" class="date-quick-btn" data-target="edit-task-date-input" data-action="clear">No Due Date</button>
+          <button type="button" class="date-quick-btn" data-target="edit-task-date-input" data-action="today">Today</button>
+          <button type="button" class="date-quick-btn" data-target="edit-task-date-input" data-action="tomorrow">Tomorrow</button>
+          <button type="button" class="date-quick-btn" data-target="edit-task-date-input" data-action="in7days">In 7 days</button>
+        </div>
         <div class="modal-actions">
           <button id="cancel-edit-btn" type="button" class="btn-secondary">Cancel</button>
           <button id="save-edit-btn" type="submit" class="btn-primary">Save</button>
@@ -182,6 +188,12 @@
         <input type="text" id="add-task-name-input" placeholder="Task name" required maxlength="120">
         <textarea id="add-task-description-input" placeholder="Description (optional)" rows="3"></textarea>
         <input type="date" id="add-task-date-input">
+        <div class="date-quick-actions">
+          <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="clear">No Due Date</button>
+          <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="today">Today</button>
+          <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="tomorrow">Tomorrow</button>
+          <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="in7days">In 7 days</button>
+        </div>
         <div class="modal-actions">
           <button id="cancel-add-task-btn" type="button" class="btn-secondary">Cancel</button>
           <button id="confirm-add-task-btn" type="submit" class="btn-primary">Add task</button>
