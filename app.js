@@ -907,7 +907,7 @@
 
   function getDeferDates() {
     const start = todayKey();
-    return enumerateDateKeys(addDays(start, 1), addDays(start, 6));
+    return enumerateDateKeys(start, addDays(start, 6));
   }
 
   function formatDateLong(dateKey) {
@@ -2138,15 +2138,19 @@
     upsertTaskDescription(savedTaskId, description);
   }
 
-  function populateDeferSelect() {
-    const select = $("#defer-date-select");
-    select.innerHTML = "";
+  function populateDeferButtons() {
+    const container = $("#defer-date-buttons");
+    container.innerHTML = "";
 
     getDeferDates().forEach((dateKey) => {
-      const option = document.createElement("option");
-      option.value = dateKey;
-      option.textContent = formatDateLong(dateKey);
-      select.appendChild(option);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "defer-date-btn";
+      btn.textContent = formatDateLong(dateKey);
+      btn.addEventListener("click", () => {
+        deferToDate(dateKey);
+      });
+      container.appendChild(btn);
     });
   }
 
@@ -2156,7 +2160,7 @@
     if (!task) return;
 
     deferTaskId = taskId;
-    populateDeferSelect();
+    populateDeferButtons();
     $("#defer-task-name").textContent = task.name;
     $("#defer-modal").classList.remove("hidden");
     $("#defer-modal").setAttribute("aria-hidden", "false");
@@ -2168,7 +2172,7 @@
     $("#defer-modal").setAttribute("aria-hidden", "true");
   }
 
-  function confirmDeferTask() {
+  function deferToDate(dateKey) {
     if (!currentProjectId || !deferTaskId) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[deferTaskId];
@@ -2177,11 +2181,26 @@
       return;
     }
 
-    const nextDate = $("#defer-date-select").value;
-    if (!isDateKey(nextDate)) return;
+    const timestamp = nowIso();
+    task.dueDate = dateKey;
+    task.updatedAt = timestamp;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    closeDeferModal();
+    renderDayView();
+  }
+
+  function clearDeferDate() {
+    if (!currentProjectId || !deferTaskId) return;
+    const projectState = ensureProjectState(currentProjectId, "");
+    const task = projectState.tasks[deferTaskId];
+    if (!task) {
+      closeDeferModal();
+      return;
+    }
 
     const timestamp = nowIso();
-    task.dueDate = nextDate;
+    task.dueDate = null;
     task.updatedAt = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
@@ -2441,7 +2460,7 @@
     $("#cancel-add-task-btn").addEventListener("click", closeAddTaskModal);
     $("#add-task-form").addEventListener("submit", submitAddTask);
     $("#cancel-defer-btn").addEventListener("click", closeDeferModal);
-    $("#confirm-defer-btn").addEventListener("click", confirmDeferTask);
+    $("#clear-due-date-btn").addEventListener("click", clearDeferDate);
     $("#cancel-edit-btn").addEventListener("click", closeEditModal);
     $("#edit-task-form").addEventListener("submit", saveEditedTask);
 
