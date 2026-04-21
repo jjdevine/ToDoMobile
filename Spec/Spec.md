@@ -14,12 +14,30 @@ The application supports offline use through a service worker.
 
 The app supports two kinds of projects:
 
-1. Generated projects, created from `.txt` configuration files in the `Projects/` folder.
-2. Manual projects, created directly in the UI without any corresponding configuration file.
+1. **Configured projects** — projects that have a recurring task configuration, supplied by the user via the in-app configuration screen.
+2. **Manual projects** — projects that have no recurring configuration; they contain only user-created tasks.
 
-For generated projects, the project name is derived from the configuration filename. For example, `Daily Tasks.txt` becomes the `Daily Tasks` project.
+All projects are created in the UI. There are no longer any `.txt` configuration files in the repository.
 
-Manual projects are task containers for user-created tasks only. They do not have recurring generation rules, and refresh actions for those projects are disabled.
+### Adding a recurring configuration
+
+From the project screen, any project can be given a recurring configuration by clicking the **Configure** button. The configuration modal allows the user to either:
+
+- Paste configuration text directly into a textarea, or
+- Upload a `.txt` file in the same format.
+
+The configuration text is stored in the Supabase `project_configs` table (when signed in) and cached in `localStorage` for offline use. Project configurations are never stored in the repository.
+
+The configuration format is the same as the previous `Projects/*.txt` format:
+
+- Each line is either a comment (`# ...`) or a task rule.
+- Task rules follow the pattern: `task name-weekly-monday,friday` or `task name-monthly-1`.
+
+Once a configuration is saved, the project immediately generates any recurring tasks for the current 7-day window.
+
+The configuration can be updated or cleared at any time from the Configure button on the project screen.
+
+Manual projects are task containers for user-created tasks only. They do not have recurring generation rules, and refresh actions for those projects are disabled until a configuration is added.
 
 ## Home screen
 
@@ -35,10 +53,10 @@ Each project card shows:
 
 The home screen also provides:
 
-- A `Generate tasks now` action to run recurring task generation for all generated projects
-- A `New Project` form for creating manual projects
+- A `Generate tasks now` action to run recurring task generation for all configured projects
+- A `New Project` form for creating projects (which can then be given a recurring configuration via the project screen)
 
-If there are no projects, the app explains that the user can either add a `.txt` file to `Projects/` and run `node build.js`, or create a manual project in the UI.
+If there are no projects, the app explains that the user can create a project using the `Create project` button.
 
 ## Default project
 
@@ -50,7 +68,7 @@ The default project setting is stored as part of the app state and syncs across 
 
 ## Recurring project generation
 
-Recurring projects are defined by text configuration files. The configuration format matches the example `Daily Tasks.txt`, and the parsing logic is based on the provided `ToDoListGenerator.java`.
+Projects with a recurring configuration generate tasks automatically. The configuration is provided in-app via the Configure button on the project screen (see **Project sources** above).
 
 Supported recurring rules are:
 
@@ -72,7 +90,9 @@ When a project is opened, the project screen acts as a navigation and summary vi
 
 The project screen contains:
 
-- A refresh button for recurring projects
+- An `Add Task` button
+- A **Configure** button (opens the configuration modal for adding or editing the recurring configuration)
+- A **Refresh tasks** button for configured projects
 - An `Overdue` entry directly below the refresh button
 - A `No Due Date` entry below the `Overdue` entry
 - A `Next 7 Days` list

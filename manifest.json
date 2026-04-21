@@ -1,15 +1,4 @@
 {
-  "buildTime": 1776674803688,
-  "projects": [
-    {
-      "id": "daily-tasks",
-      "name": "Daily Tasks",
-      "file": "Projects/Daily Tasks.txt"
-    },
-    {
-      "id": "shopping",
-      "name": "Shopping",
-      "file": "Projects/Shopping.txt"
-    }
-  ]
+  "buildTime": 1776783330076,
+  "projects": []
 }
