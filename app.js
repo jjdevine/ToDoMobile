@@ -2,8 +2,10 @@
   "use strict";
 
   const STORAGE_KEY = "task_planner_state_v1";
+  const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
   const TABLE_NAME = "todo_state";
   const DESCRIPTIONS_TABLE = "task_descriptions";
+  const PROJECT_CONFIGS_TABLE = "project_configs";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
@@ -67,9 +69,10 @@
   let deferTaskId = null;
   let editTaskId = null;
   let pendingTaskCompletions = {};
+  let configModalProjectId = null;
 
-  let manifest = { buildTime: Date.now(), projects: [] };
   let projectConfigs = {};
+  let projectConfigTexts = {};
   let appState = createEmptyState();
 
   function nowIso() {
@@ -659,102 +662,134 @@
     return rule.qualifiers.indexOf(parseDateKey(dateKey).getDate()) >= 0;
   }
 
-  async function loadManifest() {
+  // --- Project config local cache ---
+
+  function loadLocalProjectConfigs() {
     try {
-      const response = await fetch("manifest.json?v=" + Date.now());
-      if (!response.ok) {
-        throw new Error("HTTP " + response.status);
-      }
-      manifest = await response.json();
-      if (!Array.isArray(manifest.projects)) {
-        manifest.projects = [];
+      const raw = localStorage.getItem(PROJECT_CONFIGS_STORAGE_KEY);
+      projectConfigTexts = raw ? JSON.parse(raw) : {};
+      if (typeof projectConfigTexts !== "object" || Array.isArray(projectConfigTexts)) {
+        projectConfigTexts = {};
       }
     } catch (error) {
-      console.warn("Manifest could not be loaded:", error);
-      manifest = { buildTime: Date.now(), projects: [] };
+      console.warn("Failed to load local project configs:", error);
+      projectConfigTexts = {};
     }
   }
 
-  async function loadProjectConfigs() {
+  function saveLocalProjectConfigs() {
+    try {
+      localStorage.setItem(PROJECT_CONFIGS_STORAGE_KEY, JSON.stringify(projectConfigTexts));
+    } catch (error) {
+      console.warn("Failed to save local project configs:", error);
+    }
+  }
+
+  function rebuildProjectConfigs() {
     projectConfigs = {};
-    await Promise.all(
-      manifest.projects.map(async (project) => {
-        try {
-          const response = await fetch(project.file + "?v=" + manifest.buildTime);
-          if (!response.ok) {
-            throw new Error("HTTP " + response.status);
+    Object.keys(projectConfigTexts).forEach((projectId) => {
+      const text = projectConfigTexts[projectId];
+      if (text && typeof text === "string") {
+        projectConfigs[projectId] = parseProjectConfig(text);
+      }
+    });
+  }
+
+  // --- Project config Supabase API ---
+
+  async function fetchAllProjectConfigsFromDb() {
+    if (!supabase || !currentUser) return;
+    try {
+      const { data, error } = await supabase
+        .from(PROJECT_CONFIGS_TABLE)
+        .select("project_id, config_text")
+        .eq("user_id", currentUser.id);
+      if (error) {
+        console.warn("Failed to fetch project configs:", error.message);
+        return;
+      }
+      if (Array.isArray(data)) {
+        data.forEach((row) => {
+          if (row.project_id && typeof row.config_text === "string") {
+            projectConfigTexts[row.project_id] = row.config_text;
           }
-          const text = await response.text();
-          projectConfigs[project.id] = parseProjectConfig(text);
-        } catch (error) {
-          console.warn("Project config could not be loaded:", project.file, error);
-          projectConfigs[project.id] = [];
-        }
-      })
-    );
+        });
+        saveLocalProjectConfigs();
+        rebuildProjectConfigs();
+      }
+    } catch (error) {
+      console.warn("Failed to fetch project configs:", error);
+    }
   }
 
-  function getManifestProject(projectId) {
-    return manifest.projects.find((project) => project.id === projectId) || null;
+  async function upsertProjectConfigToDb(projectId, configText) {
+    if (!supabase || !currentUser) return;
+    try {
+      const { error } = await supabase.from(PROJECT_CONFIGS_TABLE).upsert({
+        user_id: currentUser.id,
+        project_id: projectId,
+        config_text: configText,
+      });
+      if (error) {
+        console.warn("Failed to save project config:", error.message);
+      }
+    } catch (error) {
+      console.warn("Failed to save project config:", error);
+    }
   }
 
-  function getManualProjects() {
-    const manifestIds = new Set(manifest.projects.map((project) => project.id));
+  async function deleteProjectConfigFromDb(projectId) {
+    if (!supabase || !currentUser) return;
+    try {
+      const { error } = await supabase
+        .from(PROJECT_CONFIGS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId);
+      if (error) {
+        console.warn("Failed to delete project config:", error.message);
+      }
+    } catch (error) {
+      console.warn("Failed to delete project config:", error);
+    }
+  }
+
+  function getAllProjects() {
     return Object.keys(appState.projects)
-      .filter((projectId) => !manifestIds.has(projectId))
       .map((projectId) => {
         const projectState = appState.projects[projectId];
         return {
           id: projectId,
           name: projectState && projectState.name ? projectState.name : projectId,
-          file: null,
-          hasConfig: false,
+          hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
         };
       })
       .filter((project) => project.name)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function getAllProjects() {
-    return manifest.projects
-      .map((project) => ({
-        ...project,
-        hasConfig: true,
-      }))
-      .concat(getManualProjects());
-  }
-
   function getProjectMeta(projectId) {
-    const manifestProject = getManifestProject(projectId);
-    if (manifestProject) {
-      return {
-        ...manifestProject,
-        hasConfig: true,
-      };
-    }
-
     const projectState = appState.projects[projectId];
     if (!projectState || !projectState.name) return null;
 
     return {
       id: projectId,
       name: projectState.name,
-      file: null,
-      hasConfig: false,
+      hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
     };
   }
 
-  function buildManualProjectId(name) {
+  function buildProjectId(name) {
     const slug = String(name || "")
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") || "project";
-    let candidate = "manual-" + slug;
+    let candidate = "project-" + slug;
     let suffix = 2;
 
     while (getProjectMeta(candidate) || appState.projects[candidate]) {
-      candidate = "manual-" + slug + "-" + suffix;
+      candidate = "project-" + slug + "-" + suffix;
       suffix += 1;
     }
 
@@ -773,35 +808,11 @@
     return projectState;
   }
 
-  function ensureManifestProjectsInState() {
-    let changed = false;
-    manifest.projects.forEach((project) => {
-      if (!appState.projects[project.id]) {
-        appState.projects[project.id] = createEmptyProjectState(project.id, project.name);
-        changed = true;
-        return;
-      }
-
-      if (appState.projects[project.id].name !== project.name) {
-        appState.projects[project.id].name = project.name;
-        appState.projects[project.id].updatedAt = nowIso();
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      appState.updatedAt = nowIso();
-    }
-
-    return changed;
-  }
-
   function generateTasksForProject(projectId) {
-    const projectManifest = getManifestProject(projectId);
-    if (!projectManifest) return { created: 0, changed: false };
+    const rules = projectConfigs[projectId];
+    if (!rules || !rules.length) return { created: 0, changed: false };
 
-    const projectState = ensureProjectState(projectId, projectManifest.name);
-    const rules = projectConfigs[projectId] || [];
+    const projectState = ensureProjectState(projectId, "");
     const horizonStart = todayKey();
     const horizonEnd = addDays(horizonStart, 6);
     const rangeStart = projectState.lastGeneratedThrough && compareDateKeys(projectState.lastGeneratedThrough, horizonStart) < 0
@@ -857,8 +868,8 @@
     let created = 0;
     let changed = false;
 
-    manifest.projects.forEach((project) => {
-      const result = generateTasksForProject(project.id);
+    Object.keys(projectConfigs).forEach((projectId) => {
+      const result = generateTasksForProject(projectId);
       created += result.created;
       changed = changed || result.changed;
     });
@@ -1072,17 +1083,15 @@
       });
       topRowActions.appendChild(defaultButton);
 
-      if (!project.hasConfig) {
-        const deleteButton = document.createElement("button");
-        deleteButton.type = "button";
-        deleteButton.className = "project-card-delete";
-        deleteButton.textContent = "Delete";
-        deleteButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteManualProject(project.id);
-        });
-        topRowActions.appendChild(deleteButton);
-      }
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "project-card-delete";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteProject(project.id);
+      });
+      topRowActions.appendChild(deleteButton);
 
       topRow.appendChild(topRowActions);
 
@@ -1100,7 +1109,7 @@
         ? "Generated through " + formatDateShort(projectState.lastGeneratedThrough)
         : project.hasConfig
           ? "Not generated yet"
-          : "Manual project with your own tasks";
+          : "No recurring config — add one from the project screen";
 
       card.appendChild(topRow);
       card.appendChild(meta);
@@ -1109,13 +1118,18 @@
     });
   }
 
-  function deleteManualProject(projectId) {
+  function deleteProject(projectId) {
     const project = getProjectMeta(projectId);
-    if (!project || project.hasConfig) return;
+    if (!project) return;
 
-    if (!confirm('Delete manual project "' + project.name + '" and all its tasks?')) return;
+    if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
     delete appState.projects[projectId];
+    delete projectConfigTexts[projectId];
+    delete projectConfigs[projectId];
+    saveLocalProjectConfigs();
+    deleteProjectConfigFromDb(projectId);
+
     if (currentProjectId === projectId) {
       currentProjectId = null;
     }
@@ -1150,7 +1164,7 @@
       if (!button) return;
       button.disabled = !hasConfig;
       button.textContent = hasConfig ? "Refresh tasks" : "No recurring config";
-      button.title = hasConfig ? "Generate any recurring tasks now" : "This project does not have a recurring configuration file.";
+      button.title = hasConfig ? "Generate any recurring tasks now" : "This project has no recurring config. Use the Configure button to add one.";
     });
   }
 
@@ -1755,7 +1769,7 @@
     $("#project-title").textContent = project.name;
     $("#project-subtitle").textContent = project.hasConfig
       ? "Select a day to view its tasks."
-      : "Manual project. Add your own tasks and use the date list to focus each day.";
+      : "No recurring config. Use the Configure button to add one, or add tasks manually.";
 
     renderProjectTaskViewCards(project.id);
     renderDayStrip(project.id);
@@ -1981,13 +1995,110 @@
       return;
     }
 
-    const projectId = buildManualProjectId(name);
+    const projectId = buildProjectId(name);
     const projectState = ensureProjectState(projectId, name);
     touchProject(projectState);
     schedulePersist("Saving changes...");
     nameInput.value = "";
     closeCreateProjectPanel();
     openProject(projectId);
+  }
+
+
+
+  // --- Project configuration modal ---
+
+  function openConfigModal(projectId) {
+    configModalProjectId = projectId;
+    const textarea = $("#config-modal-textarea");
+    const errorEl = $("#config-modal-error");
+    if (textarea) {
+      textarea.value = projectConfigTexts[projectId] || "";
+    }
+    if (errorEl) {
+      errorEl.textContent = "";
+      errorEl.classList.add("hidden");
+    }
+    $("#config-modal").classList.remove("hidden");
+    $("#config-modal").setAttribute("aria-hidden", "false");
+    if (textarea) textarea.focus();
+  }
+
+  function closeConfigModal() {
+    configModalProjectId = null;
+    $("#config-modal").classList.add("hidden");
+    $("#config-modal").setAttribute("aria-hidden", "true");
+  }
+
+  function handleConfigFileUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (readEvent) => {
+      const text = readEvent.target.result;
+      const textarea = $("#config-modal-textarea");
+      if (textarea) textarea.value = text;
+    };
+    reader.readAsText(file);
+    // Reset file input so the same file can be re-uploaded if needed.
+    event.target.value = "";
+  }
+
+  async function saveProjectConfig(event) {
+    event.preventDefault();
+    if (!configModalProjectId) return;
+
+    const textarea = $("#config-modal-textarea");
+    const errorEl = $("#config-modal-error");
+    const configText = textarea ? textarea.value : "";
+    const rules = parseProjectConfig(configText);
+
+    if (configText.trim() && !rules.length) {
+      if (errorEl) {
+        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day or task name-monthly-dayOfMonth.";
+        errorEl.classList.remove("hidden");
+      }
+      return;
+    }
+
+    if (errorEl) {
+      errorEl.textContent = "";
+      errorEl.classList.add("hidden");
+    }
+
+    const projectId = configModalProjectId;
+    projectConfigTexts[projectId] = configText;
+    projectConfigs[projectId] = rules;
+    saveLocalProjectConfigs();
+    upsertProjectConfigToDb(projectId, configText);
+
+    closeConfigModal();
+
+    const result = generateTasksForProject(projectId);
+    if (result.changed) {
+      schedulePersist(result.created ? "Config saved. Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "." : "Config saved.");
+    } else {
+      setSyncStatus("Config saved.");
+      schedulePersist("Saving changes...");
+    }
+
+    renderCurrentScreen();
+  }
+
+  async function clearProjectConfig() {
+    if (!configModalProjectId) return;
+    if (!confirm("Clear the recurring configuration for this project? Existing generated tasks will remain but no new ones will be created.")) return;
+
+    const projectId = configModalProjectId;
+    delete projectConfigTexts[projectId];
+    delete projectConfigs[projectId];
+    saveLocalProjectConfigs();
+    deleteProjectConfigFromDb(projectId);
+
+    closeConfigModal();
+    setSyncStatus("Configuration cleared.");
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
   }
 
   function completeTask(taskId) {
@@ -2444,6 +2555,9 @@
     });
     $("#refresh-project-btn").addEventListener("click", refreshCurrentProject);
     $("#refresh-day-project-btn").addEventListener("click", refreshCurrentProject);
+    $("#open-project-configure-btn").addEventListener("click", () => {
+      if (currentProjectId) openConfigModal(currentProjectId);
+    });
     $("#download-active-btn").addEventListener("click", downloadActiveTasks);
     $("#view-archive-btn").addEventListener("click", openArchive);
     $("#back-project-btn").addEventListener("click", () => {
@@ -2463,6 +2577,15 @@
     $("#clear-due-date-btn").addEventListener("click", clearDeferDate);
     $("#cancel-edit-btn").addEventListener("click", closeEditModal);
     $("#edit-task-form").addEventListener("submit", saveEditedTask);
+    $("#cancel-config-btn").addEventListener("click", closeConfigModal);
+    $("#config-form").addEventListener("submit", saveProjectConfig);
+    $("#clear-config-btn").addEventListener("click", clearProjectConfig);
+    $("#config-file-input").addEventListener("change", handleConfigFileUpload);
+    $("#config-modal").addEventListener("click", (event) => {
+      if (event.target === $("#config-modal")) {
+        closeConfigModal();
+      }
+    });
 
     document.querySelectorAll(".date-quick-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2530,14 +2653,14 @@
 
     appEntered = true;
     loadLocalState();
-    await loadManifest();
-    await loadProjectConfigs();
+    loadLocalProjectConfigs();
+    rebuildProjectConfigs();
 
     if (currentUser) {
       await pullState();
+      await fetchAllProjectConfigsFromDb();
     }
 
-    const stateChanged = ensureManifestProjectsInState();
     const generation = generateTasksForAllProjects();
 
     showUserBar();
@@ -2552,7 +2675,7 @@
       showScreen("home");
     }
 
-    if (stateChanged || generation.changed) {
+    if (generation.changed) {
       schedulePersist(generation.created ? "Generated " + generation.created + " new task" + (generation.created === 1 ? "" : "s") + "." : "Saving changes...");
     }
   }
