@@ -1249,7 +1249,6 @@
     const taskBuckets = getTaskBuckets(projectId, todayKey());
     const overdueTasks = taskBuckets.overdue;
     const noDateTasks = taskBuckets.noDate;
-    const allTasks = sortActiveTasks(getProjectTasks(projectId));
     const oldestDueDate = overdueTasks
       .map((task) => task.dueDate)
       .filter(Boolean)
@@ -1292,19 +1291,6 @@
       noDateLabel.textContent = "no tasks without a due date";
       container.appendChild(noDateLabel);
     }
-
-    container.appendChild(buildProjectTaskViewCard(
-      "All Tasks",
-      allTasks.length
-        ? allTasks.length + " task" + (allTasks.length === 1 ? "" : "s") + " in this project"
-        : "No tasks in this project",
-      "View all tasks sorted by due date",
-      () => {
-        openAllTasks();
-      },
-      "all-tasks-entry-card",
-      selectedTaskView === "all"
-    ));
   }
 
   function configureTaskDateInput(inputId, defaultDate) {
@@ -2684,6 +2670,7 @@
     $("#open-day-add-task-btn").addEventListener("click", () => {
       openAddTaskModal();
     });
+    $("#all-tasks-view-btn").addEventListener("click", openAllTasks);
     $("#refresh-project-btn").addEventListener("click", refreshCurrentProject);
     $("#refresh-day-project-btn").addEventListener("click", refreshCurrentProject);
     $("#open-project-configure-btn").addEventListener("click", () => {
