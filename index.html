@@ -206,12 +206,51 @@
     <div class="modal-card modal-card-wide">
       <h3>Project Configuration</h3>
       <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-weekly-monday,friday</code> or <code>task name-monthly-1</code>. Lines starting with <code>#</code> are comments.</p>
+
+      <div class="task-builder">
+        <h4 class="task-builder-heading">Add a new task rule</h4>
+        <div class="task-builder-field">
+          <label for="builder-task-name" class="modal-label">Task name</label>
+          <input type="text" id="builder-task-name" class="builder-input" placeholder="e.g. Review emails" maxlength="120">
+        </div>
+        <div class="task-builder-field">
+          <span class="modal-label">Cadence</span>
+          <div class="builder-radio-group">
+            <label class="builder-radio-label">
+              <input type="radio" name="builder-cadence" value="weekly" checked> Weekly
+            </label>
+            <label class="builder-radio-label">
+              <input type="radio" name="builder-cadence" value="monthly"> Monthly
+            </label>
+          </div>
+        </div>
+        <div class="task-builder-field">
+          <span class="modal-label">Schedule</span>
+          <div id="builder-weekly-schedule" class="builder-weekday-grid">
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="monday"> Mon</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="tuesday"> Tue</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="wednesday"> Wed</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="thursday"> Thu</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="friday"> Fri</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="saturday"> Sat</label>
+            <label class="builder-day-label"><input type="checkbox" name="builder-weekday" value="sunday"> Sun</label>
+          </div>
+          <div id="builder-monthly-schedule" class="hidden">
+            <input type="text" id="builder-monthly-dates" class="builder-input" placeholder='Day numbers, e.g. "1,15,28"' maxlength="60">
+          </div>
+        </div>
+        <p id="builder-error" class="auth-error hidden"></p>
+        <div class="task-builder-actions">
+          <button id="builder-add-btn" type="button" class="btn-secondary">Add to config</button>
+        </div>
+      </div>
+
       <form id="config-form" class="task-form">
         <div class="config-upload-row">
           <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
           <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
         </div>
-        <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;# This is a comment" rows="14" spellcheck="false"></textarea>
+        <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
         <p id="config-modal-error" class="auth-error hidden"></p>
         <div class="modal-actions">
           <button id="clear-config-btn" type="button" class="btn-danger">Clear config</button>

@@ -2029,15 +2029,97 @@
       errorEl.textContent = "";
       errorEl.classList.add("hidden");
     }
+    resetTaskBuilder();
     $("#config-modal").classList.remove("hidden");
     $("#config-modal").setAttribute("aria-hidden", "false");
-    if (textarea) textarea.focus();
+    const builderName = $("#builder-task-name");
+    if (builderName) builderName.focus();
   }
 
   function closeConfigModal() {
     configModalProjectId = null;
     $("#config-modal").classList.add("hidden");
     $("#config-modal").setAttribute("aria-hidden", "true");
+    resetTaskBuilder();
+  }
+
+  function resetTaskBuilder() {
+    const nameInput = $("#builder-task-name");
+    if (nameInput) nameInput.value = "";
+    const weeklyRadio = document.querySelector('input[name="builder-cadence"][value="weekly"]');
+    if (weeklyRadio) weeklyRadio.checked = true;
+    document.querySelectorAll('input[name="builder-weekday"]').forEach((cb) => { cb.checked = false; });
+    const monthlyInput = $("#builder-monthly-dates");
+    if (monthlyInput) monthlyInput.value = "";
+    const builderError = $("#builder-error");
+    if (builderError) { builderError.textContent = ""; builderError.classList.add("hidden"); }
+    updateBuilderScheduleVisibility();
+  }
+
+  function updateBuilderScheduleVisibility() {
+    const cadence = document.querySelector('input[name="builder-cadence"]:checked');
+    const weekly = $("#builder-weekly-schedule");
+    const monthly = $("#builder-monthly-schedule");
+    if (!weekly || !monthly) return;
+    if (cadence && cadence.value === "monthly") {
+      weekly.classList.add("hidden");
+      monthly.classList.remove("hidden");
+    } else {
+      weekly.classList.remove("hidden");
+      monthly.classList.add("hidden");
+    }
+  }
+
+  function handleBuilderAddTask() {
+    const builderError = $("#builder-error");
+    if (builderError) { builderError.textContent = ""; builderError.classList.add("hidden"); }
+
+    const nameInput = $("#builder-task-name");
+    const name = nameInput ? nameInput.value.trim() : "";
+    if (!name) {
+      if (builderError) { builderError.textContent = "Please enter a task name."; builderError.classList.remove("hidden"); }
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    const cadenceEl = document.querySelector('input[name="builder-cadence"]:checked');
+    const cadence = cadenceEl ? cadenceEl.value : "weekly";
+
+    let schedule = "";
+    if (cadence === "weekly") {
+      const checked = Array.from(document.querySelectorAll('input[name="builder-weekday"]:checked')).map((cb) => cb.value);
+      if (!checked.length) {
+        if (builderError) { builderError.textContent = "Please select at least one day."; builderError.classList.remove("hidden"); }
+        return;
+      }
+      schedule = checked.join(",");
+    } else {
+      const monthlyInput = $("#builder-monthly-dates");
+      const raw = monthlyInput ? monthlyInput.value.trim() : "";
+      if (!raw) {
+        if (builderError) { builderError.textContent = "Please enter at least one day of the month."; builderError.classList.remove("hidden"); }
+        if (monthlyInput) monthlyInput.focus();
+        return;
+      }
+      const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+      const valid = parts.every((p) => /^\d+$/.test(p) && parseInt(p, 10) >= 1 && parseInt(p, 10) <= 31);
+      if (!valid) {
+        if (builderError) { builderError.textContent = "Day numbers must be integers between 1 and 31, separated by commas."; builderError.classList.remove("hidden"); }
+        if (monthlyInput) monthlyInput.focus();
+        return;
+      }
+      schedule = parts.join(",");
+    }
+
+    const line = name + "-" + cadence + "-" + schedule;
+    const textarea = $("#config-modal-textarea");
+    if (textarea) {
+      const existing = textarea.value;
+      textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
+    }
+
+    resetTaskBuilder();
+    if (nameInput) nameInput.focus();
   }
 
   function handleConfigFileUpload(event) {
@@ -2591,6 +2673,10 @@
     $("#config-form").addEventListener("submit", saveProjectConfig);
     $("#clear-config-btn").addEventListener("click", clearProjectConfig);
     $("#config-file-input").addEventListener("change", handleConfigFileUpload);
+    document.querySelectorAll('input[name="builder-cadence"]').forEach((radio) => {
+      radio.addEventListener("change", updateBuilderScheduleVisibility);
+    });
+    $("#builder-add-btn").addEventListener("click", handleBuilderAddTask);
     $("#config-modal").addEventListener("click", (event) => {
       if (event.target === $("#config-modal")) {
         closeConfigModal();
