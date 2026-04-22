@@ -205,7 +205,7 @@
   <div id="config-modal" class="modal hidden" aria-hidden="true">
     <div class="modal-card modal-card-wide">
       <h3>Project Configuration</h3>
-      <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-weekly-monday,friday</code> or <code>task name-monthly-1</code>. Lines starting with <code>#</code> are comments.</p>
+      <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, or <code>task name-annual-MM-DD</code>. Lines starting with <code>#</code> are comments.</p>
 
       <div class="task-builder">
         <h4 class="task-builder-heading">Add a new task rule</h4>
@@ -221,6 +221,9 @@
             </label>
             <label class="builder-radio-label">
               <input type="radio" name="builder-cadence" value="monthly"> Monthly
+            </label>
+            <label class="builder-radio-label">
+              <input type="radio" name="builder-cadence" value="annual"> Annual
             </label>
           </div>
         </div>
@@ -238,6 +241,23 @@
           <div id="builder-monthly-schedule" class="hidden">
             <input type="text" id="builder-monthly-dates" class="builder-input" placeholder='Day numbers, e.g. "1,15,28"' maxlength="60">
           </div>
+          <div id="builder-annual-schedule" class="hidden builder-annual-row">
+            <select id="builder-annual-month" class="builder-input builder-annual-month-select">
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+            <input type="number" id="builder-annual-day" class="builder-input builder-annual-day-input" placeholder="Day" min="1" max="31">
+          </div>
         </div>
         <p id="builder-error" class="auth-error hidden"></p>
         <div class="task-builder-actions">
@@ -250,7 +270,7 @@
           <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
           <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
         </div>
-        <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
+        <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
         <p id="config-modal-error" class="auth-error hidden"></p>
         <div class="modal-actions">
           <button id="clear-config-btn" type="button" class="btn-danger">Clear config</button>

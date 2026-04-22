@@ -9,7 +9,7 @@
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly)\s*-\s*(.+?)\s*$/i;
+  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
     "sunday",
     "monday",
@@ -613,6 +613,16 @@
     return value;
   }
 
+  function parseAnnualQualifier(token) {
+    const parts = String(token || "").trim().split("-");
+    if (parts.length !== 2) return null;
+    const month = Number(parts[0]);
+    const day = Number(parts[1]);
+    if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    return { month, day };
+  }
+
   function parseProjectConfig(text) {
     const rules = [];
     const lines = String(text || "").split(/\r?\n/);
@@ -636,7 +646,9 @@
 
       const qualifiers = frequency === "weekly"
         ? qualifierTokens.map(parseWeeklyQualifier).filter(Boolean)
-        : qualifierTokens.map(parseMonthlyQualifier).filter((value) => value !== null);
+        : frequency === "monthly"
+        ? qualifierTokens.map(parseMonthlyQualifier).filter((value) => value !== null)
+        : qualifierTokens.map(parseAnnualQualifier).filter(Boolean);
 
       if (!name || !qualifiers.length) return;
 
@@ -659,7 +671,14 @@
     if (rule.frequency === "weekly") {
       return rule.qualifiers.indexOf(getWeekdayToken(dateKey)) >= 0;
     }
-    return rule.qualifiers.indexOf(parseDateKey(dateKey).getDate()) >= 0;
+    if (rule.frequency === "monthly") {
+      return rule.qualifiers.indexOf(parseDateKey(dateKey).getDate()) >= 0;
+    }
+    // annual
+    const date = parseDateKey(dateKey);
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return rule.qualifiers.some((q) => q.month === month && q.day === day);
   }
 
   // --- Project config local cache ---
@@ -2051,6 +2070,10 @@
     document.querySelectorAll('input[name="builder-weekday"]').forEach((cb) => { cb.checked = false; });
     const monthlyInput = $("#builder-monthly-dates");
     if (monthlyInput) monthlyInput.value = "";
+    const annualMonthInput = $("#builder-annual-month");
+    if (annualMonthInput) annualMonthInput.value = "1";
+    const annualDayInput = $("#builder-annual-day");
+    if (annualDayInput) annualDayInput.value = "";
     const builderError = $("#builder-error");
     if (builderError) { builderError.textContent = ""; builderError.classList.add("hidden"); }
     updateBuilderScheduleVisibility();
@@ -2060,14 +2083,12 @@
     const cadence = document.querySelector('input[name="builder-cadence"]:checked');
     const weekly = $("#builder-weekly-schedule");
     const monthly = $("#builder-monthly-schedule");
-    if (!weekly || !monthly) return;
-    if (cadence && cadence.value === "monthly") {
-      weekly.classList.add("hidden");
-      monthly.classList.remove("hidden");
-    } else {
-      weekly.classList.remove("hidden");
-      monthly.classList.add("hidden");
-    }
+    const annual = $("#builder-annual-schedule");
+    if (!weekly || !monthly || !annual) return;
+    const val = cadence ? cadence.value : "weekly";
+    weekly.classList.toggle("hidden", val !== "weekly");
+    monthly.classList.toggle("hidden", val !== "monthly");
+    annual.classList.toggle("hidden", val !== "annual");
   }
 
   function handleBuilderAddTask() {
@@ -2093,6 +2114,24 @@
         return;
       }
       schedule = checked.join(",");
+    } else if (cadence === "annual") {
+      const annualMonthInput = $("#builder-annual-month");
+      const annualDayInput = $("#builder-annual-day");
+      const month = annualMonthInput ? parseInt(annualMonthInput.value, 10) : NaN;
+      const day = annualDayInput ? parseInt(annualDayInput.value.trim(), 10) : NaN;
+      if (isNaN(month) || month < 1 || month > 12) {
+        if (builderError) { builderError.textContent = "Please select a valid month."; builderError.classList.remove("hidden"); }
+        if (annualMonthInput) annualMonthInput.focus();
+        return;
+      }
+      if (isNaN(day) || day < 1 || day > 31) {
+        if (builderError) { builderError.textContent = "Please enter a valid day of the month (1–31)."; builderError.classList.remove("hidden"); }
+        if (annualDayInput) annualDayInput.focus();
+        return;
+      }
+      const mm = String(month).padStart(2, "0");
+      const dd = String(day).padStart(2, "0");
+      schedule = mm + "-" + dd;
     } else {
       const monthlyInput = $("#builder-monthly-dates");
       const raw = monthlyInput ? monthlyInput.value.trim() : "";
@@ -2147,7 +2186,7 @@
 
     if (configText.trim() && !rules.length) {
       if (errorEl) {
-        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day or task name-monthly-dayOfMonth.";
+        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, or task name-annual-MM-DD.";
         errorEl.classList.remove("hidden");
       }
       return;

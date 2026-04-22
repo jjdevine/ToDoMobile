@@ -31,7 +31,7 @@ The configuration text is stored in the Supabase `project_configs` table (when s
 The configuration format is the same as the previous `Projects/*.txt` format:
 
 - Each line is either a comment (`# ...`) or a task rule.
-- Task rules follow the pattern: `task name-weekly-monday,friday` or `task name-monthly-1`.
+- Task rules follow the pattern: `task name-weekly-monday,friday`, `task name-monthly-1`, or `task name-annual-MM-DD`.
 
 Once a configuration is saved, the project immediately generates any recurring tasks for the current 7-day window.
 
@@ -74,6 +74,7 @@ Supported recurring rules are:
 
 - Weekly rules, using named weekdays
 - Monthly rules, using day numbers
+- Annual rules, using a specific day and month (format: `MM-DD`, e.g. `01-15` for January 15th)
 
 On app load, generated projects create any missing recurring tasks from today through the end of the current 7-day window.
 

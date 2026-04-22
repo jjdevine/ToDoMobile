@@ -1184,9 +1184,22 @@ select {
   color: var(--accent);
 }
 
-.task-builder-actions {
-  margin-top: 0.75rem;
+.builder-annual-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
 }
+
+.builder-annual-month-select {
+  flex: 1 1 auto;
+}
+
+.builder-annual-day-input {
+  width: 5rem;
+  flex: 0 0 auto;
+}
+
+
 
 .config-upload-row {
   display: flex;

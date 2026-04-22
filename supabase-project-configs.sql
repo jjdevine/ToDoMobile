@@ -5,6 +5,7 @@
 -- files: each line is either a comment (#...) or a task rule in the form
 --   task name-weekly-day[,day...]
 --   task name-monthly-dayOfMonth[,dayOfMonth...]
+--   task name-annual-MM-DD
 --
 -- How to run:
 --   1. Open your Supabase project → SQL Editor.
