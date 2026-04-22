@@ -342,6 +342,7 @@ select {
 .btn-primary,
 .btn-secondary,
 .btn-danger,
+.btn-green,
 .btn-sync,
 .btn-back,
 .btn-text,
@@ -354,6 +355,7 @@ select {
 .btn-primary,
 .btn-secondary,
 .btn-danger,
+.btn-green,
 .task-btn {
   border: 1px solid transparent;
   padding: 0.7rem 1rem;
@@ -366,6 +368,13 @@ select {
 }
 
 .btn-primary:hover { background: var(--accent-hover); }
+
+.btn-green {
+  background: #2e7d32;
+  color: #fff;
+}
+
+.btn-green:hover { background: #1b5e20; }
 
 .btn-primary:disabled,
 .btn-secondary:disabled,
