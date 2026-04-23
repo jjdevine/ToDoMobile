@@ -8,6 +8,7 @@
   const PROJECT_CONFIGS_TABLE = "project_configs";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
+  const TOAST_DISPLAY_MS = 4000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
@@ -961,6 +962,48 @@
       month: "short",
       day: "numeric",
     }).format(parseDateKey(dateKey));
+  }
+
+  // Converts a YYYY-MM-DD dateKey to a DD/MM/YYYY display string.
+  function formatDateDisplay(dateKey) {
+    if (!dateKey) return "";
+    const parts = dateKey.split("-");
+    if (parts.length !== 3) return dateKey;
+    return parts[2] + "/" + parts[1] + "/" + parts[0];
+  }
+
+  function isTaskVisibleInCurrentView(dueDate) {
+    if (selectedTaskView === "all") return true;
+    if (selectedTaskView === "day") return dueDate === selectedDate;
+    if (selectedTaskView === "nodate") return !dueDate;
+    const today = todayKey();
+    if (selectedTaskView === "overdue") {
+      return !!dueDate && compareDateKeys(dueDate, today) < 0;
+    }
+    if (selectedTaskView === "future") {
+      return !!dueDate && compareDateKeys(dueDate, addDays(today, 6)) > 0;
+    }
+    return false;
+  }
+
+  let toastTimer = null;
+
+  function showToast(message) {
+    let toast = document.getElementById("app-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "app-toast";
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.remove("app-toast-hide");
+    toast.classList.add("app-toast-show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.classList.remove("app-toast-show");
+      toast.classList.add("app-toast-hide");
+      toastTimer = null;
+    }, TOAST_DISPLAY_MS);
   }
 
   function formatTimestamp(timestamp) {
@@ -1952,11 +1995,16 @@
     nameInput.value = "";
     descriptionInput.value = "";
     dateInput.value = "";
-    if (dueDate && compareDateKeys(dueDate, todayKey()) >= 0 && compareDateKeys(dueDate, addDays(todayKey(), 6)) <= 0) {
-      selectedDate = dueDate;
-    }
 
     renderCurrentScreen();
+
+    if (!isTaskVisibleInCurrentView(dueDate)) {
+      const dateStr = dueDate ? formatDateDisplay(dueDate) : null;
+      const msg = dateStr
+        ? "Task '" + name + "' created with due date of " + dateStr + "."
+        : "Task '" + name + "' created with no due date.";
+      showToast(msg);
+    }
 
     // Persist the long description to the dedicated cloud table (fire-and-forget).
     // Always upsert so that a subsequent edit that clears the description is
