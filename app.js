@@ -1803,13 +1803,6 @@
       archived: false,
       emptyMessage: "No tasks are due on this day.",
     }));
-
-    if (taskBuckets.future.length) {
-      taskSections.appendChild(buildTaskSection("Other Future Tasks", taskBuckets.future, {
-        overdue: false,
-        archived: false,
-      }));
-    }
   }
 
   function renderProject() {
