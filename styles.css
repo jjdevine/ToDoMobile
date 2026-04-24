@@ -1106,9 +1106,32 @@ select {
   max-height: 40vh;
 }
 
-/* The config modal needs extra width for the textarea and a tall textarea. */
+/* The config modal needs extra width for the textarea and a tall textarea.
+   It is also constrained to the viewport height so that the action buttons
+   (Save / Cancel) remain visible on small screens. */
 .modal-card-wide {
   width: min(100%, 640px);
+  /* Fallback for browsers that don't support dvh */
+  max-height: calc(100vh - 2rem);
+  /* dvh accounts for the mobile browser chrome (address bar) */
+  max-height: calc(100dvh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollable region: grows to fill available space and scrolls if content
+   overflows, while the action buttons below it stay pinned. */
+.config-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Give the sticky actions a top border to visually separate from the body. */
+.config-modal-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0;
 }
 
 #config-modal-textarea {
@@ -1359,6 +1382,12 @@ select {
 
   .task-list-controls {
     justify-content: flex-start;
+  }
+
+  /* Reduce the textarea minimum height so the full modal (including the
+     task builder and action buttons) fits within a small viewport. */
+  #config-modal-textarea {
+    min-height: 6rem;
   }
 
   .day-strip {
