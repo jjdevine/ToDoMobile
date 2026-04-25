@@ -2836,7 +2836,6 @@
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
-    $("#open-create-project-btn").addEventListener("pointerup", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
     $("#back-from-inactive-btn").addEventListener("click", () => {
