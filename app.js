@@ -800,10 +800,10 @@
           id: projectId,
           name: projectState && projectState.name ? projectState.name : projectId,
           hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
-          inactive: true,
+          inactive: !!(projectState && projectState.inactive),
         };
       })
-      .filter((project) => project.name && appState.projects[project.id] && appState.projects[project.id].inactive)
+      .filter((project) => project.name && project.inactive)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
