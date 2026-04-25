@@ -59,6 +59,7 @@
       <div class="toolbar-row">
         <button id="generate-all-btn" class="btn-primary">Generate tasks now</button>
         <button id="open-create-project-btn" type="button" class="btn-secondary" aria-controls="create-project-panel" aria-expanded="false">Create project</button>
+        <button id="view-inactive-btn" type="button" class="btn-secondary hidden">Inactive projects</button>
       </div>
 
       <section id="create-project-panel" class="panel create-project-panel hidden">
@@ -150,6 +151,19 @@
 
       <div id="archive-list" class="task-sections"></div>
       <div id="archive-empty" class="empty-state hidden">No archived tasks yet.</div>
+    </div>
+
+    <div id="inactive-screen" class="screen">
+      <header class="deck-header">
+        <button id="back-from-inactive-btn" class="btn-back" aria-label="Back to projects">&larr;</button>
+        <div class="deck-header-text">
+          <h2>Inactive Projects</h2>
+          <p class="subtitle">Inactive projects are hidden from the home screen and do not generate recurring tasks.</p>
+        </div>
+      </header>
+
+      <div id="inactive-project-list" class="project-grid"></div>
+      <div id="inactive-empty" class="empty-state hidden">No inactive projects.</div>
     </div>
   </div>
 

@@ -258,6 +258,29 @@ select {
   color: #ffe3e3;
 }
 
+.project-card-inactive {
+  border: 1px solid rgba(139, 144, 165, 0.45);
+  border-radius: 999px;
+  background: rgba(40, 44, 60, 0.4);
+  color: var(--text-muted);
+  padding: 0.32rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.project-card-inactive:hover {
+  border-color: rgba(139, 144, 165, 0.75);
+  background: rgba(50, 55, 75, 0.55);
+  color: var(--text);
+}
+
+.project-card-reactivate {
+  font-size: 0.75rem;
+  padding: 0.32rem 0.7rem;
+}
+
 .project-card-default-btn {
   border: 1px solid rgba(180, 140, 80, 0.5);
   border-radius: 999px;

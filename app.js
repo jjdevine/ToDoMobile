@@ -93,6 +93,7 @@
     return {
       projectId,
       name: name || "",
+      inactive: false,
       tasks: {},
       archived: {},
       generatedOccurrences: {},
@@ -282,6 +283,7 @@
     return {
       projectId,
       name: typeof rawProject.name === "string" ? rawProject.name : "",
+      inactive: typeof rawProject.inactive === "boolean" ? rawProject.inactive : false,
       tasks: normalizeTaskMap(rawProject.tasks, projectId, false),
       archived: normalizeTaskMap(rawProject.archived, projectId, true),
       generatedOccurrences: normalizeGeneratedOccurrences(rawProject.generatedOccurrences),
@@ -385,6 +387,7 @@
     return {
       projectId,
       name: normalizedRemote.name || normalizedLocal.name || "",
+      inactive: compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0 ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
       tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, deletedTaskIds),
       archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, deletedArchiveIds),
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
@@ -782,9 +785,25 @@
           id: projectId,
           name: projectState && projectState.name ? projectState.name : projectId,
           hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
+          inactive: !!(projectState && projectState.inactive),
         };
       })
-      .filter((project) => project.name)
+      .filter((project) => project.name && !project.inactive)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function getInactiveProjects() {
+    return Object.keys(appState.projects)
+      .map((projectId) => {
+        const projectState = appState.projects[projectId];
+        return {
+          id: projectId,
+          name: projectState && projectState.name ? projectState.name : projectId,
+          hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
+          inactive: true,
+        };
+      })
+      .filter((project) => project.name && appState.projects[project.id] && appState.projects[project.id].inactive)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -889,6 +908,8 @@
     let changed = false;
 
     Object.keys(projectConfigs).forEach((projectId) => {
+      const projectState = appState.projects[projectId];
+      if (projectState && projectState.inactive) return;
       const result = generateTasksForProject(projectId);
       created += result.created;
       changed = changed || result.changed;
@@ -1055,6 +1076,7 @@
       $("#project-screen").classList.toggle("active", name === "project");
       $("#day-screen").classList.toggle("active", name === "day");
       $("#archive-screen").classList.toggle("active", name === "archive");
+      $("#inactive-screen").classList.toggle("active", name === "inactive");
       splashEl.classList.add("splash-hiding");
       setTimeout(() => splashEl.classList.remove("active", "splash-hiding"), 480);
       return;
@@ -1066,6 +1088,7 @@
     $("#project-screen").classList.toggle("active", name === "project");
     $("#day-screen").classList.toggle("active", name === "day");
     $("#archive-screen").classList.toggle("active", name === "archive");
+    $("#inactive-screen").classList.toggle("active", name === "inactive");
   }
 
   function showUserBar() {
@@ -1103,6 +1126,10 @@
 
     if (!projects.length) {
       emptyState.classList.remove("hidden");
+      const viewInactiveBtn = $("#view-inactive-btn");
+      if (viewInactiveBtn) {
+        viewInactiveBtn.classList.toggle("hidden", getInactiveProjects().length === 0);
+      }
       return;
     }
 
@@ -1155,6 +1182,17 @@
       });
       topRowActions.appendChild(deleteButton);
 
+      const inactiveButton = document.createElement("button");
+      inactiveButton.type = "button";
+      inactiveButton.className = "project-card-inactive";
+      inactiveButton.textContent = "Make inactive";
+      inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
+      inactiveButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        makeProjectInactive(project.id);
+      });
+      topRowActions.appendChild(inactiveButton);
+
       topRow.appendChild(topRowActions);
 
       const meta = document.createElement("div");
@@ -1178,6 +1216,11 @@
       card.appendChild(footer);
       projectGrid.appendChild(card);
     });
+
+    const viewInactiveBtn = $("#view-inactive-btn");
+    if (viewInactiveBtn) {
+      viewInactiveBtn.classList.toggle("hidden", getInactiveProjects().length === 0);
+    }
   }
 
   function deleteProject(projectId) {
@@ -1202,6 +1245,44 @@
     schedulePersist("Saving changes...");
     renderHome();
     showScreen("home");
+  }
+
+  function makeProjectInactive(projectId) {
+    const project = getProjectMeta(projectId);
+    if (!project) return;
+
+    const projectState = ensureProjectState(projectId, "");
+    projectState.inactive = true;
+    touchProject(projectState);
+
+    if (appState.defaultProjectId === projectId) {
+      appState.defaultProjectId = null;
+    }
+
+    schedulePersist("Project set to inactive.");
+    renderHome();
+  }
+
+  function reactivateProject(projectId) {
+    const projectState = ensureProjectState(projectId, "");
+    projectState.inactive = false;
+    touchProject(projectState);
+
+    const result = generateTasksForProject(projectId);
+    if (result.changed) {
+      schedulePersist(result.created
+        ? "Project reactivated. Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "."
+        : "Project reactivated.");
+    } else {
+      schedulePersist("Project reactivated.");
+    }
+
+    if (getInactiveProjects().length === 0) {
+      renderHome();
+      showScreen("home");
+    } else {
+      renderInactiveProjects();
+    }
   }
 
   function setDefaultProject(projectId) {
@@ -1892,6 +1973,11 @@
   }
 
   function renderCurrentScreen() {
+    if ($("#inactive-screen").classList.contains("active")) {
+      renderInactiveProjects();
+      return;
+    }
+
     if ($("#archive-screen").classList.contains("active")) {
       renderArchiveScreen();
       return;
@@ -1946,6 +2032,64 @@
   function openArchive() {
     renderArchiveScreen();
     showScreen("archive");
+  }
+
+  function renderInactiveProjects() {
+    const listEl = $("#inactive-project-list");
+    const emptyEl = $("#inactive-empty");
+    if (!listEl || !emptyEl) return;
+
+    listEl.innerHTML = "";
+    const projects = getInactiveProjects();
+
+    if (!projects.length) {
+      emptyEl.classList.remove("hidden");
+      return;
+    }
+
+    emptyEl.classList.add("hidden");
+
+    projects.forEach((project) => {
+      const card = document.createElement("div");
+      card.className = "project-card";
+
+      const topRow = document.createElement("div");
+      topRow.className = "project-card-top";
+
+      const title = document.createElement("div");
+      title.className = "project-card-title";
+      title.textContent = project.name;
+
+      const topRowActions = document.createElement("div");
+      topRowActions.className = "project-card-top-actions";
+
+      const reactivateButton = document.createElement("button");
+      reactivateButton.type = "button";
+      reactivateButton.className = "btn-secondary project-card-reactivate";
+      reactivateButton.textContent = "Reactivate";
+      reactivateButton.title = "Show this project on the home screen and resume recurring task generation.";
+      reactivateButton.addEventListener("click", () => {
+        reactivateProject(project.id);
+      });
+      topRowActions.appendChild(reactivateButton);
+
+      topRow.appendChild(title);
+      topRow.appendChild(topRowActions);
+      card.appendChild(topRow);
+
+      const meta = document.createElement("div");
+      meta.className = "project-card-meta";
+      meta.appendChild(createChip(project.hasConfig ? "recurring" : "manual project"));
+      meta.appendChild(createChip("inactive"));
+      card.appendChild(meta);
+
+      listEl.appendChild(card);
+    });
+  }
+
+  function openInactiveProjects() {
+    renderInactiveProjects();
+    showScreen("inactive");
   }
 
   function getActiveTask(taskId) {
@@ -2043,9 +2187,11 @@
     const name = nameInput.value.trim();
     if (!name) return;
 
-    const existingProject = getAllProjects().find((project) => project.name.toLowerCase() === name.toLowerCase());
+    const existingProject = [...getAllProjects(), ...getInactiveProjects()].find((project) => project.name.toLowerCase() === name.toLowerCase());
     if (existingProject) {
-      setSyncStatus('A project named "' + name + '" already exists.');
+      setSyncStatus(existingProject.inactive
+        ? 'An inactive project named "' + name + '" already exists. Reactivate it from Inactive projects.'
+        : 'A project named "' + name + '" already exists.');
       nameInput.focus();
       nameInput.select();
       return;
@@ -2692,6 +2838,11 @@
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
     $("#open-create-project-btn").addEventListener("pointerup", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
+    $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
+    $("#back-from-inactive-btn").addEventListener("click", () => {
+      renderHome();
+      showScreen("home");
+    });
     $("#back-home-btn").addEventListener("click", () => {
       currentProjectId = null;
       renderHome();
