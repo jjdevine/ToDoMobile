@@ -1254,6 +1254,24 @@ select {
   flex: 0 0 auto;
 }
 
+.builder-interval-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.builder-interval-label {
+  font-size: 0.9rem;
+  color: var(--text-muted, #666);
+  white-space: nowrap;
+}
+
+.builder-interval-input {
+  width: 5rem;
+  flex: 0 0 auto;
+}
+
 
 
 .config-upload-row {

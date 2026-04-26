@@ -10,7 +10,7 @@
   const COMPLETE_DELAY_MS = 2000;
   const TOAST_DISPLAY_MS = 4000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual)\s*-\s*(.+?)\s*$/i;
+  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
     "sunday",
     "monday",
@@ -627,6 +627,16 @@
     return { month, day };
   }
 
+  function parseIntervalQualifier(token) {
+    const match = String(token || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const day = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return { year, month, day };
+  }
+
   function parseProjectConfig(text) {
     const rules = [];
     const lines = String(text || "").split(/\r?\n/);
@@ -652,9 +662,17 @@
         ? qualifierTokens.map(parseWeeklyQualifier).filter(Boolean)
         : frequency === "monthly"
         ? qualifierTokens.map(parseMonthlyQualifier).filter((value) => value !== null)
+        : /^every\d+weeks$/i.test(frequency) || /^every\d+months$/i.test(frequency)
+        ? qualifierTokens.map(parseIntervalQualifier).filter(Boolean)
         : qualifierTokens.map(parseAnnualQualifier).filter(Boolean);
 
       if (!name || !qualifiers.length) return;
+
+      // Validate that the interval N is at least 1 for every-N-weeks/months rules.
+      if (/^every(\d+)(?:weeks|months)$/i.test(frequency)) {
+        const intervalMatch = frequency.match(/^every(\d+)/i);
+        if (!intervalMatch || parseInt(intervalMatch[1], 10) < 1) return;
+      }
 
       rules.push({
         name,
@@ -677,6 +695,26 @@
     }
     if (rule.frequency === "monthly") {
       return rule.qualifiers.indexOf(parseDateKey(dateKey).getDate()) >= 0;
+    }
+    if (/^every\d+weeks$/i.test(rule.frequency)) {
+      const n = parseInt(rule.frequency.match(/\d+/)[0], 10);
+      const ref = rule.qualifiers[0];
+      if (!ref) return false;
+      const refDate = new Date(ref.year, ref.month - 1, ref.day);
+      const checkDate = parseDateKey(dateKey);
+      const diffMs = checkDate - refDate;
+      if (diffMs < 0) return false;
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      return diffDays % (n * 7) === 0;
+    }
+    if (/^every\d+months$/i.test(rule.frequency)) {
+      const n = parseInt(rule.frequency.match(/\d+/)[0], 10);
+      const ref = rule.qualifiers[0];
+      if (!ref) return false;
+      const checkDate = parseDateKey(dateKey);
+      if (checkDate.getDate() !== ref.day) return false;
+      const monthDiff = (checkDate.getFullYear() - ref.year) * 12 + (checkDate.getMonth() + 1 - ref.month);
+      return monthDiff >= 0 && monthDiff % n === 0;
     }
     // annual
     const date = parseDateKey(dateKey);
@@ -2247,6 +2285,14 @@
     if (annualMonthInput) annualMonthInput.value = "1";
     const annualDayInput = $("#builder-annual-day");
     if (annualDayInput) annualDayInput.value = "";
+    const everyWeeksInterval = $("#builder-every-weeks-interval");
+    if (everyWeeksInterval) everyWeeksInterval.value = "";
+    const everyWeeksStart = $("#builder-every-weeks-start");
+    if (everyWeeksStart) everyWeeksStart.value = "";
+    const everyMonthsInterval = $("#builder-every-months-interval");
+    if (everyMonthsInterval) everyMonthsInterval.value = "";
+    const everyMonthsStart = $("#builder-every-months-start");
+    if (everyMonthsStart) everyMonthsStart.value = "";
     const builderError = $("#builder-error");
     if (builderError) { builderError.textContent = ""; builderError.classList.add("hidden"); }
     updateBuilderScheduleVisibility();
@@ -2257,11 +2303,15 @@
     const weekly = $("#builder-weekly-schedule");
     const monthly = $("#builder-monthly-schedule");
     const annual = $("#builder-annual-schedule");
+    const everyWeeks = $("#builder-every-weeks-schedule");
+    const everyMonths = $("#builder-every-months-schedule");
     if (!weekly || !monthly || !annual) return;
     const val = cadence ? cadence.value : "weekly";
     weekly.classList.toggle("hidden", val !== "weekly");
     monthly.classList.toggle("hidden", val !== "monthly");
     annual.classList.toggle("hidden", val !== "annual");
+    if (everyWeeks) everyWeeks.classList.toggle("hidden", val !== "everyweeks");
+    if (everyMonths) everyMonths.classList.toggle("hidden", val !== "everymonths");
   }
 
   function handleBuilderAddTask() {
@@ -2305,6 +2355,38 @@
       const mm = String(month).padStart(2, "0");
       const dd = String(day).padStart(2, "0");
       schedule = mm + "-" + dd;
+    } else if (cadence === "everyweeks") {
+      const intervalInput = $("#builder-every-weeks-interval");
+      const startInput = $("#builder-every-weeks-start");
+      const interval = intervalInput ? parseInt(intervalInput.value.trim(), 10) : NaN;
+      const start = startInput ? startInput.value.trim() : "";
+      if (isNaN(interval) || interval < 1) {
+        if (builderError) { builderError.textContent = "Please enter a valid interval of 1 or more weeks."; builderError.classList.remove("hidden"); }
+        if (intervalInput) intervalInput.focus();
+        return;
+      }
+      if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+        if (builderError) { builderError.textContent = "Please enter a valid start date (YYYY-MM-DD)."; builderError.classList.remove("hidden"); }
+        if (startInput) startInput.focus();
+        return;
+      }
+      return appendIntervalRule(name, "every" + interval + "weeks", start, builderError, nameInput);
+    } else if (cadence === "everymonths") {
+      const intervalInput = $("#builder-every-months-interval");
+      const startInput = $("#builder-every-months-start");
+      const interval = intervalInput ? parseInt(intervalInput.value.trim(), 10) : NaN;
+      const start = startInput ? startInput.value.trim() : "";
+      if (isNaN(interval) || interval < 1) {
+        if (builderError) { builderError.textContent = "Please enter a valid interval of 1 or more months."; builderError.classList.remove("hidden"); }
+        if (intervalInput) intervalInput.focus();
+        return;
+      }
+      if (!start || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+        if (builderError) { builderError.textContent = "Please enter a valid start date (YYYY-MM-DD)."; builderError.classList.remove("hidden"); }
+        if (startInput) startInput.focus();
+        return;
+      }
+      return appendIntervalRule(name, "every" + interval + "months", start, builderError, nameInput);
     } else {
       const monthlyInput = $("#builder-monthly-dates");
       const raw = monthlyInput ? monthlyInput.value.trim() : "";
@@ -2334,6 +2416,17 @@
     if (nameInput) nameInput.focus();
   }
 
+  function appendIntervalRule(name, frequency, start, builderError, nameInput) {
+    const line = name + "-" + frequency + "-" + start;
+    const textarea = $("#config-modal-textarea");
+    if (textarea) {
+      const existing = textarea.value;
+      textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
+    }
+    resetTaskBuilder();
+    if (nameInput) nameInput.focus();
+  }
+
   function handleConfigFileUpload(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -2359,7 +2452,7 @@
 
     if (configText.trim() && !rules.length) {
       if (errorEl) {
-        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, or task name-annual-MM-DD.";
+        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-every2weeks-YYYY-MM-DD, or task name-every3months-YYYY-MM-DD.";
         errorEl.classList.remove("hidden");
       }
       return;
