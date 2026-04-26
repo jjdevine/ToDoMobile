@@ -634,6 +634,9 @@
     const month = parseInt(match[2], 10);
     const day = parseInt(match[3], 10);
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    // Reject impossible dates (e.g. February 31st) by round-tripping through Date.
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() + 1 !== month || d.getDate() !== day) return null;
     return { year, month, day };
   }
 
@@ -2305,13 +2308,13 @@
     const annual = $("#builder-annual-schedule");
     const everyWeeks = $("#builder-every-weeks-schedule");
     const everyMonths = $("#builder-every-months-schedule");
-    if (!weekly || !monthly || !annual) return;
+    if (!weekly || !monthly || !annual || !everyWeeks || !everyMonths) return;
     const val = cadence ? cadence.value : "weekly";
     weekly.classList.toggle("hidden", val !== "weekly");
     monthly.classList.toggle("hidden", val !== "monthly");
     annual.classList.toggle("hidden", val !== "annual");
-    if (everyWeeks) everyWeeks.classList.toggle("hidden", val !== "everyweeks");
-    if (everyMonths) everyMonths.classList.toggle("hidden", val !== "everymonths");
+    everyWeeks.classList.toggle("hidden", val !== "everyweeks");
+    everyMonths.classList.toggle("hidden", val !== "everymonths");
   }
 
   function handleBuilderAddTask() {
@@ -2452,7 +2455,7 @@
 
     if (configText.trim() && !rules.length) {
       if (errorEl) {
-        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-every2weeks-YYYY-MM-DD, or task name-every3months-YYYY-MM-DD.";
+        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-everyNweeks-YYYY-MM-DD, or task name-everyNmonths-YYYY-MM-DD.";
         errorEl.classList.remove("hidden");
       }
       return;
