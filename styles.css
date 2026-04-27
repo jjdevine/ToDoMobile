@@ -912,7 +912,7 @@ select {
 .task-description a {
   color: inherit;
   text-decoration: underline;
-  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 .task-card h4 a:hover,

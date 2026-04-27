@@ -1650,7 +1650,7 @@
   }
 
   function linkify(text) {
-    const urlPattern = /https?:\/\/[^\s<>"'()]+|www\.[^\s<>"'()]+/g;
+    const urlPattern = /https?:\/\/[^\s<>"']+|www\.[^\s<>"']+/g;
     const fragment = document.createDocumentFragment();
     let lastIndex = 0;
     let match;
@@ -1658,10 +1658,18 @@
       if (match.index > lastIndex) {
         fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
       }
+      // Strip trailing punctuation that is unlikely to be part of the URL
+      let url = match[0].replace(/[.,!?;:]+$/, "");
+      // Strip trailing unbalanced closing parentheses
+      let opens = (url.match(/\(/g) || []).length;
+      let closes = (url.match(/\)/g) || []).length;
+      while (closes > opens && url.endsWith(")")) {
+        url = url.slice(0, -1);
+        closes--;
+      }
       const a = document.createElement("a");
-      const href = match[0].startsWith("www.") ? "https://" + match[0] : match[0];
-      a.href = href;
-      a.textContent = match[0];
+      a.href = url.startsWith("www.") ? "https://" + url : url;
+      a.textContent = url;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       fragment.appendChild(a);
