@@ -1649,6 +1649,30 @@
     return meta;
   }
 
+  function linkify(text) {
+    const urlPattern = /https?:\/\/[^\s<>"'()]+|www\.[^\s<>"'()]+/g;
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let match;
+    while ((match = urlPattern.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+      const a = document.createElement("a");
+      const href = match[0].startsWith("www.") ? "https://" + match[0] : match[0];
+      a.href = href;
+      a.textContent = match[0];
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      fragment.appendChild(a);
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+    return fragment;
+  }
+
   function buildTaskCard(task, options) {
     const card = document.createElement("div");
     card.className = "task-card";
@@ -1665,7 +1689,7 @@
     titleRow.className = "task-card-title-row";
 
     const title = document.createElement("h4");
-    title.textContent = task.name;
+    title.appendChild(linkify(task.name));
     titleRow.appendChild(title);
 
     if (!options.archived && task.pinned) {
@@ -1718,7 +1742,7 @@
     if (task.description) {
       const description = document.createElement("p");
       description.className = "task-description";
-      description.textContent = task.description;
+      description.appendChild(linkify(task.description));
       card.appendChild(description);
     }
 
