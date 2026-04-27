@@ -908,6 +908,18 @@ select {
   white-space: pre-wrap;
 }
 
+.task-card h4 a,
+.task-description a {
+  color: inherit;
+  text-decoration: underline;
+  overflow-wrap: break-word;
+}
+
+.task-card h4 a:hover,
+.task-description a:hover {
+  opacity: 0.8;
+}
+
 .task-meta {
   display: flex;
   flex-wrap: wrap;
