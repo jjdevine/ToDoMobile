@@ -1929,10 +1929,13 @@
       const today = todayKey();
       const allTasks = sortActiveTasks(getProjectTasks(projectId));
       const overdueAll = [];
+      const todayAll = [];
       const restAll = [];
       allTasks.forEach((task) => {
         if (task.dueDate && compareDateKeys(task.dueDate, today) < 0) {
           overdueAll.push(task);
+        } else if (task.dueDate === today) {
+          todayAll.push(task);
         } else {
           restAll.push(task);
         }
@@ -1943,6 +1946,16 @@
           archived: false,
           emptyMessage: "",
         }));
+      }
+      if (todayAll.length) {
+        const todayWrapper = document.createElement("div");
+        todayWrapper.className = "today-tasks-wrapper";
+        todayWrapper.appendChild(buildTaskSection("Today · " + formatDateLong(today), todayAll, {
+          overdue: false,
+          archived: false,
+          emptyMessage: "",
+        }));
+        taskSections.appendChild(todayWrapper);
       }
       taskSections.appendChild(buildTaskSection("Upcoming & Undated", restAll, {
         overdue: false,
