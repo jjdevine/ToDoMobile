@@ -998,9 +998,11 @@
     return enumerateDateKeys(start, addDays(start, 6));
   }
 
-  function getDeferDates() {
+  function getDeferDates(excludeDateKey) {
     const start = todayKey();
-    return enumerateDateKeys(start, addDays(start, 6));
+    const dates = enumerateDateKeys(start, addDays(start, 6));
+    if (!excludeDateKey) return dates;
+    return dates.filter((d) => d !== excludeDateKey);
   }
 
   function formatDateLong(dateKey) {
@@ -2694,15 +2696,24 @@
     upsertTaskDescription(savedTaskId, description);
   }
 
-  function populateDeferButtons() {
+  function formatDeferDateLabel(dateKey) {
+    const today = todayKey();
+    const tomorrowKey = addDays(today, 1);
+    let label = formatDateLong(dateKey);
+    if (dateKey === today) label += " (Today)";
+    else if (dateKey === tomorrowKey) label += " (Tomorrow)";
+    return label;
+  }
+
+  function populateDeferButtons(task) {
     const container = $("#defer-date-buttons");
     container.innerHTML = "";
 
-    getDeferDates().forEach((dateKey) => {
+    getDeferDates(task ? task.dueDate : null).forEach((dateKey) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "defer-date-btn";
-      btn.textContent = formatDateLong(dateKey);
+      btn.textContent = formatDeferDateLabel(dateKey);
       btn.addEventListener("click", () => {
         deferToDate(dateKey);
       });
@@ -2716,7 +2727,7 @@
     if (!task) return;
 
     deferTaskId = taskId;
-    populateDeferButtons();
+    populateDeferButtons(task);
     $("#defer-task-name").textContent = task.name;
     $("#defer-modal").classList.remove("hidden");
     $("#defer-modal").setAttribute("aria-hidden", "false");
