@@ -2674,7 +2674,7 @@
   function openAddTaskModal(defaultProjectId) {
     const projects = getAllProjects();
     if (!projects.length) return;
-    const resolvedDefaultId = defaultProjectId || currentProjectId || (projects.length ? projects[0].id : null);
+    const resolvedDefaultId = defaultProjectId || currentProjectId || projects[0].id;
     if (!resolvedDefaultId) return;
     $("#add-task-name-input").value = "";
     $("#add-task-description-input").value = "";
