@@ -1167,6 +1167,11 @@
     projectGrid.innerHTML = "";
     const projects = getAllProjects();
 
+    const homeAddTaskBtn = $("#open-home-add-task-btn");
+    if (homeAddTaskBtn) {
+      homeAddTaskBtn.classList.toggle("hidden", projects.length === 0);
+    }
+
     if (!projects.length) {
       emptyState.classList.remove("hidden");
       const viewInactiveBtn = $("#view-inactive-btn");
@@ -2186,9 +2191,11 @@
   }
 
   function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
-    if (!currentProjectId) return false;
+    const select = $("#add-task-project-select");
+    const targetProjectId = (select && select.value) ? select.value : currentProjectId;
+    if (!targetProjectId) return false;
 
-    const projectState = ensureProjectState(currentProjectId, "");
+    const projectState = ensureProjectState(targetProjectId, "");
     const nameInput = $("#" + nameInputId);
     const descriptionInput = $("#" + descriptionInputId);
     const dateInput = $("#" + dateInputId);
@@ -2203,7 +2210,7 @@
 
     projectState.tasks[taskId] = {
       id: taskId,
-      projectId: currentProjectId,
+      projectId: targetProjectId,
       name,
       description,
       dueDate,
@@ -2223,7 +2230,17 @@
 
     renderCurrentScreen();
 
-    if (!isTaskVisibleInCurrentView(dueDate)) {
+    const targetProjectMeta = getProjectMeta(targetProjectId);
+    const targetProjectName = targetProjectMeta ? targetProjectMeta.name : targetProjectId;
+
+    if (targetProjectId !== currentProjectId) {
+      // Task was added to a different project than the one currently being viewed
+      const dateStr = dueDate ? formatDateDisplay(dueDate) : null;
+      const msg = dateStr
+        ? "Task '" + name + "' added to project '" + targetProjectName + "' with due date of " + dateStr + "."
+        : "Task '" + name + "' successfully added to project '" + targetProjectName + "'.";
+      showToast(msg);
+    } else if (!isTaskVisibleInCurrentView(dueDate)) {
       const dateStr = dueDate ? formatDateDisplay(dueDate) : null;
       const msg = dateStr
         ? "Task '" + name + "' created with due date of " + dateStr + "."
@@ -2640,10 +2657,28 @@
     return selectedTaskView === "day" && isDateKey(selectedDate) ? selectedDate : "";
   }
 
-  function openAddTaskModal() {
-    if (!currentProjectId) return;
+  function populateAddTaskProjectSelect(defaultProjectId) {
+    const select = $("#add-task-project-select");
+    if (!select) return;
+    select.innerHTML = "";
+    const projects = getAllProjects();
+    projects.forEach((project) => {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = project.name;
+      if (project.id === defaultProjectId) option.selected = true;
+      select.appendChild(option);
+    });
+  }
+
+  function openAddTaskModal(defaultProjectId) {
+    const projects = getAllProjects();
+    if (!projects.length) return;
+    const resolvedDefaultId = defaultProjectId || currentProjectId || (projects.length ? projects[0].id : null);
+    if (!resolvedDefaultId) return;
     $("#add-task-name-input").value = "";
     $("#add-task-description-input").value = "";
+    populateAddTaskProjectSelect(resolvedDefaultId);
     configureTaskDateInput("add-task-date-input", getDefaultAddTaskDate());
     $("#add-task-modal").classList.remove("hidden");
     $("#add-task-modal").setAttribute("aria-hidden", "false");
@@ -2990,6 +3025,9 @@
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
+    $("#open-home-add-task-btn").addEventListener("click", () => {
+      openAddTaskModal(null);
+    });
     $("#back-from-inactive-btn").addEventListener("click", () => {
       renderHome();
       showScreen("home");
