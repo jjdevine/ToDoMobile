@@ -59,6 +59,7 @@
       <div class="toolbar-row">
         <button id="generate-all-btn" class="btn-primary">Generate tasks now</button>
         <button id="open-create-project-btn" type="button" class="btn-secondary" aria-controls="create-project-panel" aria-expanded="false">Create project</button>
+        <button id="open-home-add-task-btn" type="button" class="btn-secondary hidden">Add task</button>
         <button id="view-inactive-btn" type="button" class="btn-secondary hidden">Inactive projects</button>
       </div>
 
@@ -207,6 +208,10 @@
       <form id="add-task-form" class="task-form">
         <input type="text" id="add-task-name-input" placeholder="Task name" required maxlength="120">
         <textarea id="add-task-description-input" placeholder="Description (optional)" rows="3"></textarea>
+        <div class="add-task-project-row">
+          <label for="add-task-project-select" class="modal-label">Project</label>
+          <select id="add-task-project-select" class="add-task-project-select"></select>
+        </div>
         <input type="date" id="add-task-date-input">
         <div class="date-quick-actions">
           <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="clear">No Due Date</button>

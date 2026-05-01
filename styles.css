@@ -1333,6 +1333,14 @@ select {
   color: var(--text-muted);
 }
 
+.add-task-project-row {
+  margin-bottom: 0.75rem;
+}
+
+.add-task-project-select {
+  width: 100%;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
