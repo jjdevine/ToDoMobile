@@ -1167,6 +1167,9 @@
     projectGrid.innerHTML = "";
     const projects = getAllProjects();
 
+    const deleteAllArchivesBtn = $("#delete-all-archives-btn");
+    if (deleteAllArchivesBtn) deleteAllArchivesBtn.disabled = true;
+
     const homeAddTaskBtn = $("#open-home-add-task-btn");
     if (homeAddTaskBtn) {
       homeAddTaskBtn.classList.toggle("hidden", projects.length === 0);
@@ -2938,6 +2941,66 @@
     downloadTextFile(name + " Archive.txt", buildTaskExport(currentProjectId, true));
   }
 
+  function downloadAllArchivedTasks() {
+    const allProjects = [...getAllProjects(), ...getInactiveProjects()];
+    const lines = [];
+    lines.push("All Archived Tasks");
+    lines.push("Exported: " + new Date().toLocaleString());
+    lines.push("");
+
+    allProjects.forEach((project) => {
+      const archivedTasks = sortArchivedTasks(getProjectArchivedTasks(project.id));
+      if (!archivedTasks.length) return;
+      lines.push("=== " + project.name + " ===");
+      archivedTasks.forEach((task) => {
+        lines.push(task.name);
+        lines.push("  Source: " + (task.source === "generated" ? "Recurring" : "Manual"));
+        lines.push("  Due: " + (task.dueDate ? task.dueDate : "No due date"));
+        if (task.completedAt) {
+          lines.push("  Completed: " + task.completedAt);
+        }
+        if (task.description) {
+          lines.push("  Description: " + task.description.replace(/\r?\n/g, " "));
+        }
+        lines.push("");
+      });
+    });
+
+    downloadTextFile("All Archived Tasks.txt", lines.join("\n"));
+
+    const deleteBtn = $("#delete-all-archives-btn");
+    if (deleteBtn) deleteBtn.disabled = false;
+  }
+
+  function deleteAllArchivedTasks() {
+    const allProjects = [...getAllProjects(), ...getInactiveProjects()];
+    const projectArchives = allProjects.map((project) => ({
+      project,
+      archiveIds: Object.keys(getProjectState(project.id).archived || {}),
+    }));
+    const totalArchived = projectArchives.reduce((sum, entry) => sum + entry.archiveIds.length, 0);
+    if (!totalArchived) return;
+
+    if (!confirm("Delete " + totalArchived + " archived task" + (totalArchived === 1 ? "" : "s") + " across all projects?")) return;
+
+    const timestamp = nowIso();
+    projectArchives.forEach(({ project, archiveIds }) => {
+      if (!archiveIds.length) return;
+      const projectState = ensureProjectState(project.id, "");
+      archiveIds.forEach((taskId) => {
+        delete projectState.archived[taskId];
+        projectState.deletedArchiveIds[taskId] = timestamp;
+        deleteTaskDescription(taskId);
+      });
+      touchProject(projectState, timestamp);
+    });
+
+    schedulePersist("Saving changes...");
+
+    const deleteBtn = $("#delete-all-archives-btn");
+    if (deleteBtn) deleteBtn.disabled = true;
+  }
+
   function refreshCurrentProject() {
     if (!currentProjectId) return;
     const project = getProjectMeta(currentProjectId);
@@ -3028,6 +3091,8 @@
     $("#open-home-add-task-btn").addEventListener("click", () => {
       openAddTaskModal(null);
     });
+    $("#download-all-archives-btn").addEventListener("click", downloadAllArchivedTasks);
+    $("#delete-all-archives-btn").addEventListener("click", deleteAllArchivedTasks);
     $("#back-from-inactive-btn").addEventListener("click", () => {
       renderHome();
       showScreen("home");
