@@ -412,11 +412,11 @@
     projectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
       const remoteProject = remote.projects[projectId];
-      const winningProject = localProject && remoteProject
-        ? null // will be merged below
+      const singleSourceProject = localProject && remoteProject
+        ? null // both exist and will be merged below
         : (localProject || remoteProject);
-      const projectUpdatedAt = winningProject
-        ? winningProject.updatedAt
+      const projectUpdatedAt = singleSourceProject
+        ? singleSourceProject.updatedAt
         : laterIso(localProject && localProject.updatedAt, remoteProject && remoteProject.updatedAt);
       const deletionTime = deletedProjectIds[projectId];
       if (deletionTime && compareIso(deletionTime, projectUpdatedAt) >= 0) return;
@@ -1593,7 +1593,6 @@
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
     const deletionTime = nowIso();
-    appState.deletedProjectIds = appState.deletedProjectIds || {};
     appState.deletedProjectIds[projectId] = deletionTime;
     delete appState.projects[projectId];
     delete projectConfigTexts[projectId];
