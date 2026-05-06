@@ -799,10 +799,7 @@
 
     setSyncStatus("Resyncing\u2026");
     appState = mergeStates(appState, pendingResyncRemoteState);
-    const generation = generateTasksForAllProjects();
-    if (generation.changed) {
-      saveStateLocal();
-    }
+    generateTasksForAllProjects();
     saveStateLocal();
     await pushState();
     renderCurrentScreen();
