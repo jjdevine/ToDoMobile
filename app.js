@@ -86,6 +86,7 @@
       updatedAt: nowIso(),
       projects: {},
       defaultProjectId: null,
+      deletedProjectIds: {},
     };
   }
 
@@ -302,6 +303,7 @@
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
     normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
+    normalized.deletedProjectIds = normalizeTimestampMap(rawState.deletedProjectIds);
 
     if (isPlainObject(rawState.projects)) {
       Object.keys(rawState.projects).forEach((projectId) => {
@@ -404,8 +406,21 @@
     const merged = createEmptyState();
     const projectIds = new Set(Object.keys(local.projects).concat(Object.keys(remote.projects)));
 
+    const deletedProjectIds = mergeTimestampMaps(local.deletedProjectIds, remote.deletedProjectIds);
+    merged.deletedProjectIds = deletedProjectIds;
+
     projectIds.forEach((projectId) => {
-      merged.projects[projectId] = mergeProjectStates(projectId, local.projects[projectId], remote.projects[projectId]);
+      const localProject = local.projects[projectId];
+      const remoteProject = remote.projects[projectId];
+      const singleSourceProject = localProject && remoteProject
+        ? null // both exist and will be merged below
+        : (localProject || remoteProject);
+      const projectUpdatedAt = singleSourceProject
+        ? singleSourceProject.updatedAt
+        : laterIso(localProject && localProject.updatedAt, remoteProject && remoteProject.updatedAt);
+      const deletionTime = deletedProjectIds[projectId];
+      if (deletionTime && compareIso(deletionTime, projectUpdatedAt) >= 0) return;
+      merged.projects[projectId] = mergeProjectStates(projectId, localProject, remoteProject);
     });
 
     merged.updatedAt = laterIso(local.updatedAt, remote.updatedAt);
@@ -577,24 +592,46 @@
       const remoteProject = remote.projects[projectId];
 
       if (!localProject) {
-        // Entire project is only in remote
-        const taskCount = Object.keys(remoteProject.tasks || {}).length;
-        remoteNewer.push({
-          kind: "project",
-          label: remoteProject.name || projectId,
-          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-        });
+        // Project is only in remote — check if local has a deletion tombstone
+        const localDeletion = (local.deletedProjectIds || {})[projectId];
+        if (localDeletion && compareIso(localDeletion, remoteProject.updatedAt) >= 0) {
+          // Local deleted it more recently — local will push this deletion to remote
+          localNewer.push({
+            kind: "deleted",
+            label: remoteProject.name || projectId,
+            detail: "Project deleted locally",
+          });
+        } else {
+          // Remote has it and local doesn't (or remote is newer than local deletion)
+          const taskCount = Object.keys(remoteProject.tasks || {}).length;
+          remoteNewer.push({
+            kind: "project",
+            label: remoteProject.name || projectId,
+            detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+          });
+        }
         return;
       }
 
       if (!remoteProject) {
-        // Entire project is only in local
-        const taskCount = Object.keys(localProject.tasks || {}).length;
-        localNewer.push({
-          kind: "project",
-          label: localProject.name || projectId,
-          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-        });
+        // Project is only in local — check if remote has a deletion tombstone
+        const remoteDeletion = (remote.deletedProjectIds || {})[projectId];
+        if (remoteDeletion && compareIso(remoteDeletion, localProject.updatedAt) >= 0) {
+          // Remote deleted it more recently — local will receive this deletion
+          remoteNewer.push({
+            kind: "deleted",
+            label: localProject.name || projectId,
+            detail: "Project deleted remotely",
+          });
+        } else {
+          // Local has it and remote doesn't (or local is newer than remote deletion)
+          const taskCount = Object.keys(localProject.tasks || {}).length;
+          localNewer.push({
+            kind: "project",
+            label: localProject.name || projectId,
+            detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+          });
+        }
         return;
       }
 
@@ -1555,6 +1592,8 @@
 
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
+    const deletionTime = nowIso();
+    appState.deletedProjectIds[projectId] = deletionTime;
     delete appState.projects[projectId];
     delete projectConfigTexts[projectId];
     delete projectConfigs[projectId];
@@ -1567,7 +1606,7 @@
     if (appState.defaultProjectId === projectId) {
       appState.defaultProjectId = null;
     }
-    appState.updatedAt = nowIso();
+    appState.updatedAt = deletionTime;
     schedulePersist("Saving changes...");
     renderHome();
     showScreen("home");
