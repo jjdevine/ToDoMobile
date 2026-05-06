@@ -1468,6 +1468,94 @@ select {
   }
 }
 
+/* Resync modal */
+.resync-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.resync-modal-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0;
+}
+
+.resync-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.resync-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.resync-section-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.resync-section-badge-remote {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.resync-section-badge-local {
+  background: rgba(76, 175, 124, 0.18);
+  color: var(--green);
+}
+
+.resync-item-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.resync-item {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.75rem;
+}
+
+.resync-item-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.resync-item-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.resync-in-sync {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--green);
+  font-size: 0.9rem;
+  padding: 0.5rem 0;
+}
+
 /* ── Toast notification ──────────────────────────────────── */
 #app-toast {
   position: fixed;

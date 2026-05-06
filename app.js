@@ -535,6 +535,281 @@
     setSyncStatus("Sync complete.");
   }
 
+  // --- Force resync: compare local vs remote and confirm before merging ---
+
+  async function fetchRemoteStateRaw() {
+    if (!supabase || !currentUser) return null;
+    try {
+      const { data, error } = await supabase
+        .from(TABLE_NAME)
+        .select("*")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+      if (error) {
+        console.error("Resync fetch error:", error.message);
+        return null;
+      }
+      if (!data || !data.state_data) return null;
+      const remoteState = normalizeState(data.state_data);
+      if (!remoteState.updatedAt && data.updated_at) {
+        remoteState.updatedAt = data.updated_at;
+      }
+      return remoteState;
+    } catch (error) {
+      console.error("Resync fetch exception:", error);
+      return null;
+    }
+  }
+
+  function diffLocalRemote(localState, remoteState) {
+    const local = normalizeState(localState);
+    const remote = normalizeState(remoteState);
+
+    const remoteNewer = []; // changes local will pull from remote
+    const localNewer = [];  // changes remote will receive from local
+
+    const allProjectIds = new Set(
+      Object.keys(local.projects).concat(Object.keys(remote.projects))
+    );
+
+    allProjectIds.forEach((projectId) => {
+      const localProject = local.projects[projectId];
+      const remoteProject = remote.projects[projectId];
+
+      if (!localProject) {
+        // Entire project is only in remote
+        const taskCount = Object.keys(remoteProject.tasks || {}).length;
+        remoteNewer.push({
+          kind: "project",
+          label: remoteProject.name || projectId,
+          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+        });
+        return;
+      }
+
+      if (!remoteProject) {
+        // Entire project is only in local
+        const taskCount = Object.keys(localProject.tasks || {}).length;
+        localNewer.push({
+          kind: "project",
+          label: localProject.name || projectId,
+          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+        });
+        return;
+      }
+
+      const projectName = remoteProject.name || localProject.name || projectId;
+
+      function diffEntityMaps(localMap, remoteMap, localDeletedMap, remoteDeletedMap, entityLabel) {
+        const allIds = new Set(
+          Object.keys(localMap || {}).concat(Object.keys(remoteMap || {}))
+        );
+
+        allIds.forEach((id) => {
+          const localEntity = (localMap || {})[id];
+          const remoteEntity = (remoteMap || {})[id];
+
+          if (!localEntity && remoteEntity) {
+            const localDeletion = (localDeletedMap || {})[id];
+            if (localDeletion && compareIso(localDeletion, remoteEntity.updatedAt) >= 0) {
+              // Local deleted it more recently — local will push this deletion to remote
+              localNewer.push({
+                kind: "deleted",
+                label: remoteEntity.name || id,
+                projectName,
+                detail: entityLabel + " deleted locally",
+              });
+            } else {
+              // Remote has it and local doesn't (or remote is newer than local deletion)
+              remoteNewer.push({
+                kind: "task",
+                label: remoteEntity.name || id,
+                projectName,
+                detail: "New " + entityLabel,
+              });
+            }
+          } else if (localEntity && !remoteEntity) {
+            const remoteDeletion = (remoteDeletedMap || {})[id];
+            if (remoteDeletion && compareIso(remoteDeletion, localEntity.updatedAt) >= 0) {
+              // Remote deleted it more recently — local will receive this deletion
+              remoteNewer.push({
+                kind: "deleted",
+                label: localEntity.name || id,
+                projectName,
+                detail: entityLabel + " deleted remotely",
+              });
+            } else {
+              // Local has it and remote doesn't (or local is newer than remote deletion)
+              localNewer.push({
+                kind: "task",
+                label: localEntity.name || id,
+                projectName,
+                detail: "New " + entityLabel,
+              });
+            }
+          } else if (localEntity && remoteEntity) {
+            const cmp = compareIso(localEntity.updatedAt, remoteEntity.updatedAt);
+            if (cmp > 0) {
+              localNewer.push({
+                kind: "task",
+                label: localEntity.name || id,
+                projectName,
+                detail: entityLabel + " modified",
+              });
+            } else if (cmp < 0) {
+              remoteNewer.push({
+                kind: "task",
+                label: remoteEntity.name || id,
+                projectName,
+                detail: entityLabel + " modified",
+              });
+            }
+          }
+        });
+      }
+
+      diffEntityMaps(
+        localProject.tasks,
+        remoteProject.tasks,
+        localProject.deletedTaskIds,
+        remoteProject.deletedTaskIds,
+        "task"
+      );
+
+      diffEntityMaps(
+        localProject.archived,
+        remoteProject.archived,
+        localProject.deletedArchiveIds,
+        remoteProject.deletedArchiveIds,
+        "completed task"
+      );
+    });
+
+    return { remoteNewer, localNewer };
+  }
+
+  let pendingResyncRemoteState = null;
+
+  function buildResyncDiffHtml(diff) {
+    const { remoteNewer, localNewer } = diff;
+    const total = remoteNewer.length + localNewer.length;
+
+    if (total === 0) {
+      return '<div class="resync-in-sync">&#10003; Everything is in sync — no differences found.</div>';
+    }
+
+    const lines = [];
+
+    function renderSection(items, title, badgeClass) {
+      if (!items.length) return;
+      lines.push('<div class="resync-section">');
+      lines.push(
+        '<div class="resync-section-heading">' +
+        '<span class="resync-section-badge ' + badgeClass + '">' + items.length + '</span>' +
+        escapeHtml(title) +
+        "</div>"
+      );
+      lines.push('<ul class="resync-item-list">');
+      items.forEach((item) => {
+        lines.push('<li class="resync-item">');
+        lines.push('<span class="resync-item-name">' + escapeHtml(item.label) + "</span>");
+        const meta = item.projectName
+          ? escapeHtml(item.detail) + " &mdash; " + escapeHtml(item.projectName)
+          : escapeHtml(item.detail);
+        lines.push('<span class="resync-item-meta">' + meta + "</span>");
+        lines.push("</li>");
+      });
+      lines.push("</ul>");
+      lines.push("</div>");
+    }
+
+    renderSection(remoteNewer, "Remote is newer — local will receive these changes", "resync-section-badge-remote");
+    renderSection(localNewer, "Local is newer — remote will receive these changes", "resync-section-badge-local");
+
+    return lines.join("\n");
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function openResyncModal() {
+    if (!currentUser || !supabase) return;
+
+    const statusEl = $("#resync-status-text");
+    const diffEl = $("#resync-diff");
+    const confirmBtn = $("#confirm-resync-btn");
+
+    statusEl.textContent = "Checking remote state\u2026";
+    diffEl.innerHTML = "";
+    confirmBtn.classList.add("hidden");
+    pendingResyncRemoteState = null;
+
+    $("#resync-modal").classList.remove("hidden");
+    $("#resync-modal").setAttribute("aria-hidden", "false");
+
+    if (!navigator.onLine) {
+      statusEl.textContent = "You appear to be offline. Please check your connection and try again.";
+      return;
+    }
+
+    const remoteState = await fetchRemoteStateRaw();
+
+    if (!remoteState) {
+      statusEl.textContent = "Could not reach the server. Please check your connection and try again.";
+      return;
+    }
+
+    const diff = diffLocalRemote(appState, remoteState);
+    const total = diff.remoteNewer.length + diff.localNewer.length;
+
+    if (total === 0) {
+      statusEl.textContent = "No differences found between local and remote state.";
+    } else {
+      statusEl.textContent =
+        "Found " + total + " difference" + (total === 1 ? "" : "s") + ". " +
+        "Confirming will merge both sides to the most recent version of each item.";
+      confirmBtn.classList.remove("hidden");
+      pendingResyncRemoteState = remoteState;
+    }
+
+    diffEl.innerHTML = buildResyncDiffHtml(diff);
+  }
+
+  function closeResyncModal() {
+    pendingResyncRemoteState = null;
+    $("#resync-modal").classList.add("hidden");
+    $("#resync-modal").setAttribute("aria-hidden", "true");
+  }
+
+  async function confirmResync() {
+    if (!pendingResyncRemoteState) {
+      closeResyncModal();
+      return;
+    }
+
+    const confirmBtn = $("#confirm-resync-btn");
+    const cancelBtn = $("#cancel-resync-btn");
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+
+    setSyncStatus("Resyncing\u2026");
+    appState = mergeStates(appState, pendingResyncRemoteState);
+    generateTasksForAllProjects();
+    saveStateLocal();
+    await pushState();
+    renderCurrentScreen();
+    setSyncStatus("Resync complete.");
+
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    closeResyncModal();
+  }
+
   // --- Task description API (task_descriptions table) ---
 
   async function fetchTaskDescription(taskId) {
@@ -3192,6 +3467,20 @@
       $("#sync-now-btn").disabled = true;
       await syncNow();
       $("#sync-now-btn").disabled = false;
+    });
+
+    $("#force-resync-btn").addEventListener("click", async () => {
+      $("#force-resync-btn").disabled = true;
+      await openResyncModal();
+      $("#force-resync-btn").disabled = false;
+    });
+
+    $("#cancel-resync-btn").addEventListener("click", closeResyncModal);
+    $("#confirm-resync-btn").addEventListener("click", confirmResync);
+    $("#resync-modal").addEventListener("click", (event) => {
+      if (event.target === $("#resync-modal")) {
+        closeResyncModal();
+      }
     });
 
     $("#logout-btn").addEventListener("click", async () => {

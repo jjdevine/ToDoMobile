@@ -51,6 +51,7 @@
         <div id="user-bar" class="user-bar hidden">
           <span id="user-email" class="user-email"></span>
           <button id="sync-now-btn" class="btn-sync" title="Sync now">&#x21BB;</button>
+          <button id="force-resync-btn" class="btn-sync" title="Compare &amp; resync">&#x21C4;</button>
           <button id="logout-btn" class="btn-text">Sign out</button>
         </div>
         <p id="sync-status" class="sync-status">Local-only mode</p>
@@ -200,6 +201,20 @@
           <button id="save-edit-btn" type="submit" class="btn-primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="resync-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-card-wide">
+      <div class="resync-modal-body">
+        <h3>Compare &amp; Resync</h3>
+        <p id="resync-status-text" class="modal-text"></p>
+        <div id="resync-diff" class="resync-diff"></div>
+      </div>
+      <div class="modal-actions resync-modal-actions">
+        <button id="cancel-resync-btn" type="button" class="btn-secondary">Cancel</button>
+        <button id="confirm-resync-btn" type="button" class="btn-primary hidden">Sync both sides</button>
+      </div>
     </div>
   </div>
 
