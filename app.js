@@ -792,6 +792,7 @@
         if (!localOccurrenceKeys.has(row.project_id + "::" + row.occurrence_key)) {
           deleteOperations.push(
             supabase
+              .schema("todo")
               .from(GENERATED_OCCURRENCES_TABLE)
               .delete()
               .eq("user_id", userId)
