@@ -231,6 +231,7 @@
       updatedAt,
       completedAt,
       pinned: typeof raw.pinned === "boolean" ? raw.pinned : false,
+      endOfDay: typeof raw.endOfDay === "boolean" ? raw.endOfDay : false,
     };
   }
 
@@ -528,6 +529,7 @@
           source: task.source === "generated" ? "generated" : "manual",
           generated_key: task.generatedKey || null,
           pinned: !!task.pinned,
+          end_of_day: !!task.endOfDay,
           created_at: task.createdAt || task.updatedAt || nowIso(),
           updated_at: task.updatedAt || nowIso(),
         });
@@ -544,6 +546,7 @@
           source: task.source === "generated" ? "generated" : "manual",
           generated_key: task.generatedKey || null,
           pinned: !!task.pinned,
+          end_of_day: !!task.endOfDay,
           completed_at: task.completedAt || null,
           created_at: task.createdAt || task.updatedAt || nowIso(),
           updated_at: task.updatedAt || nowIso(),
@@ -634,6 +637,7 @@
         source: row.source,
         generatedKey: row.generated_key,
         pinned: row.pinned,
+        endOfDay: row.end_of_day,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }, projectId, false);
@@ -658,6 +662,7 @@
         source: row.source,
         generatedKey: row.generated_key,
         pinned: row.pinned,
+        endOfDay: row.end_of_day,
         completedAt: row.completed_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -701,8 +706,8 @@
     ] = await Promise.all([
       supabase.schema("todo").from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, body, created_at, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, completed_at, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
     ]);
 
@@ -1588,9 +1593,9 @@
 
   function sortActiveTasks(tasks) {
     return tasks.slice().sort((a, b) => {
-      const pinnedOrderA = a.pinned ? 0 : 1;
-      const pinnedOrderB = b.pinned ? 0 : 1;
-      if (pinnedOrderA !== pinnedOrderB) return pinnedOrderA - pinnedOrderB;
+      const catA = a.pinned ? 0 : (a.endOfDay ? 2 : 1);
+      const catB = b.pinned ? 0 : (b.endOfDay ? 2 : 1);
+      if (catA !== catB) return catA - catB;
       const dueA = a.dueDate || "9999-12-31";
       const dueB = b.dueDate || "9999-12-31";
       if (dueA !== dueB) return compareDateKeys(dueA, dueB);
@@ -2357,6 +2362,7 @@
     if (options.overdue) card.classList.add("overdue");
     if (!task.dueDate) card.classList.add("nodate");
     if (!options.archived && task.pinned) card.classList.add("pinned");
+    if (!options.archived && task.endOfDay) card.classList.add("end-of-day");
     const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
     if (pendingCompletion) card.classList.add("pending-completion");
     const condensedCard = condensedMode && !options.archived && !pendingCompletion;
@@ -2375,6 +2381,13 @@
       pinBadge.className = "pin-badge";
       pinBadge.textContent = "📌 Pinned";
       titleRow.appendChild(pinBadge);
+    }
+
+    if (!options.archived && task.endOfDay) {
+      const endOfDayBadge = document.createElement("span");
+      endOfDayBadge.className = "end-of-day-badge";
+      endOfDayBadge.textContent = "🌙 End of Day";
+      titleRow.appendChild(endOfDayBadge);
     }
 
     card.appendChild(titleRow);
@@ -2399,6 +2412,14 @@
         togglePinTask(task.id);
       });
 
+      const endOfDayButton = document.createElement("button");
+      endOfDayButton.type = "button";
+      endOfDayButton.className = "task-btn end-of-day";
+      endOfDayButton.textContent = task.endOfDay ? "Remove End of Day" : "End of Day";
+      endOfDayButton.addEventListener("click", () => {
+        toggleEndOfDayTask(task.id);
+      });
+
       const expandButton = document.createElement("button");
       expandButton.type = "button";
       expandButton.className = "task-btn expand";
@@ -2412,6 +2433,7 @@
 
       actions.appendChild(completeButton);
       actions.appendChild(pinButton);
+      actions.appendChild(endOfDayButton);
       actions.appendChild(expandButton);
       card.appendChild(actions);
       return card;
@@ -2493,6 +2515,15 @@
         togglePinTask(task.id);
       });
       actions.appendChild(pinButton);
+
+      const endOfDayButton = document.createElement("button");
+      endOfDayButton.type = "button";
+      endOfDayButton.className = "task-btn end-of-day";
+      endOfDayButton.textContent = task.endOfDay ? "Remove End of Day" : "End of Day";
+      endOfDayButton.addEventListener("click", () => {
+        toggleEndOfDayTask(task.id);
+      });
+      actions.appendChild(endOfDayButton);
 
       if (condensedCard && expandedInCondensed) {
         const collapseButton = document.createElement("button");
@@ -3480,6 +3511,22 @@
 
     const timestamp = nowIso();
     task.pinned = !task.pinned;
+    if (task.pinned) task.endOfDay = false;
+    task.updatedAt = timestamp;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
+  }
+
+  function toggleEndOfDayTask(taskId) {
+    if (!currentProjectId) return;
+    const projectState = ensureProjectState(currentProjectId, "");
+    const task = projectState.tasks[taskId];
+    if (!task) return;
+
+    const timestamp = nowIso();
+    task.endOfDay = !task.endOfDay;
+    if (task.endOfDay) task.pinned = false;
     task.updatedAt = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
