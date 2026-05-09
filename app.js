@@ -8,8 +8,6 @@
   const TASKS_TABLE = "tasks";
   const ARCHIVED_TASKS_TABLE = "archived_tasks";
   const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
-  const DESCRIPTIONS_TABLE = "task_descriptions";
-  const PROJECT_CONFIGS_TABLE = "project_configs";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const TOAST_DISPLAY_MS = 4000;
@@ -609,6 +607,12 @@
       nextState.updatedAt = laterIso(nextState.updatedAt, projectsById[projectId].updatedAt);
     });
 
+    payloadTasks.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.id !== "string") return;
+      const key = row.project_id + "::" + row.id;
+      descriptionsByTaskKey[key] = typeof row.body === "string" ? row.body : "";
+    });
+
     payloadDescriptions.forEach((row) => {
       if (!row || typeof row.project_id !== "string" || typeof row.task_id !== "string") return;
       const key = row.project_id + "::" + row.task_id;
@@ -694,14 +698,12 @@
       tasksRes,
       archivedTasksRes,
       generatedOccurrencesRes,
-      descriptionsRes,
     ] = await Promise.all([
       supabase.schema("todo").from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, body, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
-      supabase.schema("todo").from(DESCRIPTIONS_TABLE).select("project_id, task_id, body").eq("user_id", userId),
     ]);
 
     const firstError = [
@@ -710,7 +712,6 @@
       tasksRes.error,
       archivedTasksRes.error,
       generatedOccurrencesRes.error,
-      descriptionsRes.error,
     ].find(Boolean);
 
     if (firstError) {
@@ -723,7 +724,7 @@
       tasks: tasksRes.data,
       archivedTasks: archivedTasksRes.data,
       generatedOccurrences: generatedOccurrencesRes.data,
-      descriptions: descriptionsRes.data,
+      descriptions: [],
     });
   }
 
@@ -1127,17 +1128,17 @@
     closeResyncModal();
   }
 
-  // --- Task description API (task_descriptions table) ---
+  // --- Task description API (merged into tasks table) ---
 
   async function fetchTaskDescription(projectId, taskId) {
     if (!supabase || !currentUser || !projectId || !taskId) return null;
     try {
       const { data, error } = await supabase
         .schema("todo")
-        .from(DESCRIPTIONS_TABLE)
+        .from(TASKS_TABLE)
         .select("body")
         .eq("project_id", projectId)
-        .eq("task_id", taskId)
+        .eq("id", taskId)
         .eq("user_id", currentUser.id)
         .maybeSingle();
       if (error) {
@@ -1156,12 +1157,13 @@
   async function upsertTaskDescription(projectId, taskId, body) {
     if (!supabase || !currentUser || !projectId || !taskId) return;
     try {
-      const { error } = await supabase.schema("todo").from(DESCRIPTIONS_TABLE).upsert({
-        project_id: projectId,
-        task_id: taskId,
-        user_id: currentUser.id,
-        body,
-      });
+      const { error } = await supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ body })
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+        .eq("user_id", currentUser.id);
       if (error) {
         console.warn("Failed to save task description:", error.message);
         showServerConnectionIssue(error, "task-description-upsert");
@@ -1177,10 +1179,10 @@
     try {
       const { error } = await supabase
         .schema("todo")
-        .from(DESCRIPTIONS_TABLE)
-        .delete()
+        .from(TASKS_TABLE)
+        .update({ body: "" })
         .eq("project_id", projectId)
-        .eq("task_id", taskId)
+        .eq("id", taskId)
         .eq("user_id", currentUser.id);
       if (error) {
         console.warn("Failed to delete task description:", error.message);
@@ -1369,8 +1371,8 @@
     try {
       const { data, error } = await supabase
         .schema("todo")
-        .from(PROJECT_CONFIGS_TABLE)
-        .select("project_id, config_text")
+        .from(PROJECTS_TABLE)
+        .select("id, config_text")
         .eq("user_id", currentUser.id);
       if (error) {
         console.warn("Failed to fetch project configs:", error.message);
@@ -1379,8 +1381,8 @@
       }
       if (Array.isArray(data)) {
         data.forEach((row) => {
-          if (row.project_id && typeof row.config_text === "string") {
-            projectConfigTexts[row.project_id] = row.config_text;
+          if (row.id && typeof row.config_text === "string") {
+            projectConfigTexts[row.id] = row.config_text;
           }
         });
         saveLocalProjectConfigs();
@@ -1395,11 +1397,12 @@
   async function upsertProjectConfigToDb(projectId, configText) {
     if (!supabase || !currentUser) return;
     try {
-      const { error } = await supabase.schema("todo").from(PROJECT_CONFIGS_TABLE).upsert({
-        user_id: currentUser.id,
-        project_id: projectId,
-        config_text: configText,
-      });
+      const { error } = await supabase
+        .schema("todo")
+        .from(PROJECTS_TABLE)
+        .update({ config_text: configText })
+        .eq("user_id", currentUser.id)
+        .eq("id", projectId);
       if (error) {
         console.warn("Failed to save project config:", error.message);
         showServerConnectionIssue(error, "project-config-upsert");
@@ -1415,10 +1418,10 @@
     try {
       const { error } = await supabase
         .schema("todo")
-        .from(PROJECT_CONFIGS_TABLE)
-        .delete()
+        .from(PROJECTS_TABLE)
+        .update({ config_text: "" })
         .eq("user_id", currentUser.id)
-        .eq("project_id", projectId);
+        .eq("id", projectId);
       if (error) {
         console.warn("Failed to delete project config:", error.message);
         showServerConnectionIssue(error, "project-config-delete");
