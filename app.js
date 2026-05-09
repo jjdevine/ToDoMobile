@@ -393,6 +393,37 @@
     return merged;
   }
 
+  function reconcileTaskCompletionConflicts(tasks, archived, deletedTasks, deletedArchivedTasks) {
+    const mergedTasks = { ...(tasks || {}) };
+    const mergedArchived = { ...(archived || {}) };
+    const mergedDeletedTasks = { ...(deletedTasks || {}) };
+    const mergedDeletedArchivedTasks = { ...(deletedArchivedTasks || {}) };
+
+    Object.keys(mergedArchived).forEach((taskId) => {
+      const activeTask = mergedTasks[taskId];
+      const archivedTask = mergedArchived[taskId];
+      if (!activeTask || !archivedTask) return;
+
+      const activeUpdatedAt = activeTask.updatedAt;
+      const archivedTransitionAt = archivedTask.completedAt || archivedTask.updatedAt;
+
+      if (compareIso(archivedTransitionAt, activeUpdatedAt) >= 0) {
+        delete mergedTasks[taskId];
+        mergedDeletedTasks[taskId] = laterIso(mergedDeletedTasks[taskId], archivedTransitionAt);
+      } else {
+        delete mergedArchived[taskId];
+        mergedDeletedArchivedTasks[taskId] = laterIso(mergedDeletedArchivedTasks[taskId], activeUpdatedAt);
+      }
+    });
+
+    return {
+      tasks: mergedTasks,
+      archived: mergedArchived,
+      deletedTasks: mergedDeletedTasks,
+      deletedArchivedTasks: mergedDeletedArchivedTasks,
+    };
+  }
+
   function mergeProjectStates(projectId, localProject, remoteProject) {
     if (!localProject) return normalizeProjectState(projectId, remoteProject);
     if (!remoteProject) return normalizeProjectState(projectId, localProject);
@@ -402,18 +433,26 @@
 
     const mergedDeletedTasks = mergeTimestampMaps(normalizedLocal.deletedTasks, normalizedRemote.deletedTasks);
     const mergedDeletedArchivedTasks = mergeTimestampMaps(normalizedLocal.deletedArchivedTasks, normalizedRemote.deletedArchivedTasks);
+    const mergedTasks = mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, mergedDeletedTasks);
+    const mergedArchivedTasks = mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, mergedDeletedArchivedTasks);
+    const completionReconciled = reconcileTaskCompletionConflicts(
+      mergedTasks,
+      mergedArchivedTasks,
+      mergedDeletedTasks,
+      mergedDeletedArchivedTasks
+    );
 
     return {
       projectId,
       name: normalizedRemote.name || normalizedLocal.name || "",
       inactive: compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0 ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
-      tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, mergedDeletedTasks),
-      archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, mergedDeletedArchivedTasks),
+      tasks: completionReconciled.tasks,
+      archived: completionReconciled.archived,
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
       lastGeneratedThrough: maxDateKey(normalizedLocal.lastGeneratedThrough, normalizedRemote.lastGeneratedThrough),
       updatedAt: laterIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt),
-      deletedTasks: mergedDeletedTasks,
-      deletedArchivedTasks: mergedDeletedArchivedTasks,
+      deletedTasks: completionReconciled.deletedTasks,
+      deletedArchivedTasks: completionReconciled.deletedArchivedTasks,
     };
   }
 
