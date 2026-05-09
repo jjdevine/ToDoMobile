@@ -90,7 +90,6 @@
       updatedAt: nowIso(),
       projects: {},
       defaultProjectId: null,
-      deletedProjectIds: {},
     };
   }
 
@@ -102,8 +101,6 @@
       tasks: {},
       archived: {},
       generatedOccurrences: {},
-      deletedTaskIds: {},
-      deletedArchiveIds: {},
       lastGeneratedThrough: null,
       updatedAt: nowIso(),
     };
@@ -292,8 +289,6 @@
       tasks: normalizeTaskMap(rawProject.tasks, projectId, false),
       archived: normalizeTaskMap(rawProject.archived, projectId, true),
       generatedOccurrences: normalizeGeneratedOccurrences(rawProject.generatedOccurrences),
-      deletedTaskIds: normalizeTimestampMap(rawProject.deletedTaskIds),
-      deletedArchiveIds: normalizeTimestampMap(rawProject.deletedArchiveIds),
       lastGeneratedThrough: isDateKey(rawProject.lastGeneratedThrough) ? rawProject.lastGeneratedThrough : null,
       updatedAt: typeof rawProject.updatedAt === "string" ? rawProject.updatedAt : nowIso(),
     };
@@ -307,7 +302,6 @@
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
     normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
-    normalized.deletedProjectIds = normalizeTimestampMap(rawState.deletedProjectIds);
 
     if (isPlainObject(rawState.projects)) {
       Object.keys(rawState.projects).forEach((projectId) => {
@@ -394,8 +388,6 @@
       tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks),
       archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived),
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
-      deletedTaskIds: {},
-      deletedArchiveIds: {},
       lastGeneratedThrough: maxDateKey(normalizedLocal.lastGeneratedThrough, normalizedRemote.lastGeneratedThrough),
       updatedAt: laterIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt),
     };
@@ -406,7 +398,6 @@
     const remote = normalizeState(remoteState);
     const merged = createEmptyState();
     const projectIds = new Set(Object.keys(local.projects).concat(Object.keys(remote.projects)));
-    merged.deletedProjectIds = {};
 
     projectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
@@ -893,7 +884,7 @@
         remoteNewer.push({
           kind: "project",
           label: remoteProject.name || projectId,
-          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+          detail: "Project exists remotely only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
         });
         return;
       }
@@ -903,7 +894,7 @@
         localNewer.push({
           kind: "project",
           label: localProject.name || projectId,
-          detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+          detail: "Project exists locally only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
         });
         return;
       }
@@ -938,14 +929,14 @@
               kind: "task",
               label: remoteEntity.name || id,
               projectName,
-              detail: "New " + entityLabel,
+              detail: entityLabel + " exists remotely only",
             });
           } else if (localEntity && !remoteEntity) {
             localNewer.push({
               kind: "task",
               label: localEntity.name || id,
               projectName,
-              detail: "New " + entityLabel,
+              detail: entityLabel + " exists locally only",
             });
           } else if (localEntity && remoteEntity) {
             const cmp = compareIso(localEntity.updatedAt, remoteEntity.updatedAt);
