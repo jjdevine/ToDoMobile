@@ -13,6 +13,7 @@
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const TOAST_DISPLAY_MS = 4000;
+  const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
@@ -47,18 +48,31 @@
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => document.querySelectorAll(selector);
 
+  const SUPABASE_KEY =
+    typeof SUPABASE_ANON_KEY !== "undefined" && SUPABASE_ANON_KEY
+      ? SUPABASE_ANON_KEY
+      : typeof SUPABASE_PUBLISHABLE_KEY !== "undefined" && SUPABASE_PUBLISHABLE_KEY
+        ? SUPABASE_PUBLISHABLE_KEY
+        : "";
+
   const supabaseConfigured =
     typeof window.supabase !== "undefined" &&
     typeof SUPABASE_URL !== "undefined" &&
-    typeof SUPABASE_ANON_KEY !== "undefined" &&
     SUPABASE_URL &&
     SUPABASE_URL !== SUPABASE_PLACEHOLDER &&
     !/YOUR_PROJECT_REF/i.test(SUPABASE_URL) &&
-    SUPABASE_ANON_KEY &&
-    !/YOUR_SUPABASE_ANON_KEY/i.test(SUPABASE_ANON_KEY);
+    SUPABASE_KEY &&
+    !/YOUR_SUPABASE_ANON_KEY/i.test(SUPABASE_KEY) &&
+    !/YOUR_SUPABASE_PUBLISHABLE_KEY/i.test(SUPABASE_KEY);
 
   const supabase = supabaseConfigured
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        global: {
+          headers: {
+            apikey: SUPABASE_KEY,
+          },
+        },
+      })
     : null;
 
   let currentUser = null;
@@ -79,6 +93,7 @@
   let projectConfigs = {};
   let projectConfigTexts = {};
   let appState = createEmptyState();
+  let lastServerErrorToastAt = 0;
 
   function nowIso() {
     return new Date().toISOString();
@@ -741,6 +756,7 @@
       ].find(Boolean);
       if (remoteFetchError) {
         console.error("Sync push error:", remoteFetchError.message);
+        showServerConnectionIssue(remoteFetchError, "sync-push-fetch");
         return false;
       }
 
@@ -789,6 +805,7 @@
         const deleteError = deleteResults.map((result) => result.error).find(Boolean);
         if (deleteError) {
           console.error("Sync push error:", deleteError.message);
+          showServerConnectionIssue(deleteError, "sync-push-delete");
           return false;
         }
       }
@@ -815,12 +832,14 @@
       const upsertError = upsertResults.map((result) => result.error).find(Boolean);
       if (upsertError) {
         console.error("Sync push error:", upsertError.message);
+        showServerConnectionIssue(upsertError, "sync-push-upsert");
         return false;
       }
 
       return true;
     } catch (error) {
       console.error("Sync push exception:", error);
+      showServerConnectionIssue(error, "sync-push-exception");
       return false;
     } finally {
       syncInFlight = false;
@@ -828,29 +847,39 @@
   }
 
   async function pullState() {
-    if (!supabase || !currentUser) return;
+    if (!supabase || !currentUser) return false;
 
     try {
       const remoteState = await fetchNormalizedRemoteState();
-      if (!remoteState) return;
+      if (!remoteState) return false;
       appState = mergeStates(appState, remoteState);
       saveStateLocal();
+      return true;
     } catch (error) {
       console.error("Sync pull error:", error.message || error);
+      showServerConnectionIssue(error, "sync-pull");
+      return false;
     }
   }
 
   async function syncNow() {
     if (!currentUser) return;
     setSyncStatus("Syncing now...");
-    await pullState();
+    const pulled = await pullState();
     const generation = generateTasksForAllProjects();
     if (generation.changed) {
       saveStateLocal();
     }
-    await pushState();
+    const pushed = await pushState();
     renderCurrentScreen();
-    setSyncStatus("Sync complete.");
+    if (pulled && pushed) {
+      setSyncStatus("Sync complete.");
+    } else if (isOfflineModeExpected()) {
+      setSyncStatus("Saved locally. Cloud sync will retry when you are online.");
+    } else {
+      setSyncStatus("Cloud sync failed. Changes are saved locally and will retry.");
+      showToast("Cloud sync failed. Local changes are safe.");
+    }
   }
 
   // --- Force resync: compare local vs remote and confirm before merging ---
@@ -1104,6 +1133,7 @@
     if (!supabase || !currentUser || !projectId || !taskId) return null;
     try {
       const { data, error } = await supabase
+        .schema("todo")
         .from(DESCRIPTIONS_TABLE)
         .select("body")
         .eq("project_id", projectId)
@@ -1112,11 +1142,13 @@
         .maybeSingle();
       if (error) {
         console.warn("Failed to fetch task description:", error.message);
+        showServerConnectionIssue(error, "task-description-fetch");
         return null;
       }
       return data ? data.body : null;
     } catch (error) {
       console.warn("Failed to fetch task description:", error);
+      showServerConnectionIssue(error, "task-description-fetch");
       return null;
     }
   }
@@ -1132,9 +1164,11 @@
       });
       if (error) {
         console.warn("Failed to save task description:", error.message);
+        showServerConnectionIssue(error, "task-description-upsert");
       }
     } catch (error) {
       console.warn("Failed to save task description:", error);
+      showServerConnectionIssue(error, "task-description-upsert");
     }
   }
 
@@ -1150,9 +1184,11 @@
         .eq("user_id", currentUser.id);
       if (error) {
         console.warn("Failed to delete task description:", error.message);
+        showServerConnectionIssue(error, "task-description-delete");
       }
     } catch (error) {
       console.warn("Failed to delete task description:", error);
+      showServerConnectionIssue(error, "task-description-delete");
     }
   }
 
@@ -1332,11 +1368,13 @@
     if (!supabase || !currentUser) return;
     try {
       const { data, error } = await supabase
+        .schema("todo")
         .from(PROJECT_CONFIGS_TABLE)
         .select("project_id, config_text")
         .eq("user_id", currentUser.id);
       if (error) {
         console.warn("Failed to fetch project configs:", error.message);
+        showServerConnectionIssue(error, "project-config-fetch");
         return;
       }
       if (Array.isArray(data)) {
@@ -1350,6 +1388,7 @@
       }
     } catch (error) {
       console.warn("Failed to fetch project configs:", error);
+      showServerConnectionIssue(error, "project-config-fetch");
     }
   }
 
@@ -1363,9 +1402,11 @@
       });
       if (error) {
         console.warn("Failed to save project config:", error.message);
+        showServerConnectionIssue(error, "project-config-upsert");
       }
     } catch (error) {
       console.warn("Failed to save project config:", error);
+      showServerConnectionIssue(error, "project-config-upsert");
     }
   }
 
@@ -1373,15 +1414,18 @@
     if (!supabase || !currentUser) return;
     try {
       const { error } = await supabase
+        .schema("todo")
         .from(PROJECT_CONFIGS_TABLE)
         .delete()
         .eq("user_id", currentUser.id)
         .eq("project_id", projectId);
       if (error) {
         console.warn("Failed to delete project config:", error.message);
+        showServerConnectionIssue(error, "project-config-delete");
       }
     } catch (error) {
       console.warn("Failed to delete project config:", error);
+      showServerConnectionIssue(error, "project-config-delete");
     }
   }
 
@@ -1635,6 +1679,50 @@
       toast.classList.add("app-toast-hide");
       toastTimer = null;
     }, TOAST_DISPLAY_MS);
+  }
+
+  function isOfflineModeExpected() {
+    if (!currentUser || !supabase) return true;
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  }
+
+  function getErrorMessage(error) {
+    if (!error) return "";
+    if (typeof error === "string") return error;
+    if (typeof error.message === "string") return error.message;
+    return String(error);
+  }
+
+  function isServerConnectionError(error) {
+    const message = getErrorMessage(error).toLowerCase();
+    if (!message) return false;
+    return (
+      message.indexOf("failed to fetch") >= 0 ||
+      message.indexOf("fetch failed") >= 0 ||
+      message.indexOf("networkerror") >= 0 ||
+      message.indexOf("network request failed") >= 0 ||
+      message.indexOf("load failed") >= 0 ||
+      message.indexOf("connection") >= 0 ||
+      message.indexOf("timeout") >= 0 ||
+      message.indexOf("abort") >= 0
+    );
+  }
+
+  function showServerConnectionIssue(error, source) {
+    if (isOfflineModeExpected()) return;
+    if (!isServerConnectionError(error)) return;
+
+    setSyncStatus("Could not reach the server. Changes are saved locally and will retry.");
+
+    const now = Date.now();
+    if (now - lastServerErrorToastAt >= SERVER_ERROR_TOAST_COOLDOWN_MS) {
+      showToast("Could not connect to the server. Working locally for now.");
+      lastServerErrorToastAt = now;
+    }
+
+    if (source) {
+      console.warn("Server connection issue (" + source + "):", getErrorMessage(error));
+    }
   }
 
   function formatTimestamp(timestamp) {
