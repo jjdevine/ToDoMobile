@@ -13,7 +13,7 @@ The application uses three tables in a Supabase (PostgreSQL) project.
 ### 1.1 `todo_state`
 
 ```sql
-create table todo_state (
+create table todo.todo_state (
   user_id    uuid        references auth.users(id) on delete cascade primary key,
   state_data jsonb       not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
@@ -77,7 +77,7 @@ single JSONB object. Its logical shape (derived from `app.js`) is:
 ### 1.2 `task_descriptions`
 
 ```sql
-create table public.task_descriptions (
+create table todo.task_descriptions (
   task_id    text        not null,
   user_id    uuid        not null references auth.users(id) on delete cascade,
   body       text        not null default '',
@@ -94,7 +94,7 @@ state payload on every sync.
 ### 1.3 `project_configs`
 
 ```sql
-create table public.project_configs (
+create table todo.project_configs (
   user_id    uuid        not null references auth.users(id) on delete cascade,
   project_id text        not null,
   config_text text       not null default '',
@@ -204,15 +204,17 @@ The following schema replaces `todo_state` with purpose-built tables. The existi
 `task_descriptions` and `project_configs` tables are retained unchanged.
 
 ```sql
+create schema if not exists todo;
+
 -- User-level settings (replaces defaultProjectId in the blob)
-create table public.user_settings (
+create table todo.user_settings (
   user_id            uuid        primary key references auth.users(id) on delete cascade,
   default_project_id text,
   updated_at         timestamptz not null default now()
 );
 
 -- Projects
-create table public.projects (
+create table todo.projects (
   id         text        not null,
   user_id    uuid        not null references auth.users(id) on delete cascade,
   name       text        not null default '',
@@ -224,7 +226,7 @@ create table public.projects (
 );
 
 -- Active tasks
-create table public.tasks (
+create table todo.tasks (
   id            text        not null,
   user_id       uuid        not null references auth.users(id) on delete cascade,
   project_id    text        not null,
@@ -237,12 +239,12 @@ create table public.tasks (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   primary key (user_id, project_id, id),
-  foreign key (user_id, project_id) references public.projects(user_id, id)
+  foreign key (user_id, project_id) references todo.projects(user_id, id)
     on delete cascade
 );
 
 -- Archived (completed) tasks
-create table public.archived_tasks (
+create table todo.archived_tasks (
   id            text        not null,
   user_id       uuid        not null references auth.users(id) on delete cascade,
   project_id    text        not null,
@@ -256,12 +258,12 @@ create table public.archived_tasks (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   primary key (user_id, project_id, id),
-  foreign key (user_id, project_id) references public.projects(user_id, id)
+  foreign key (user_id, project_id) references todo.projects(user_id, id)
     on delete cascade
 );
 
 -- Generated occurrence tracking
-create table public.generated_occurrences (
+create table todo.generated_occurrences (
   occurrence_key text        not null,
   user_id        uuid        not null references auth.users(id) on delete cascade,
   project_id     text        not null,
@@ -270,7 +272,7 @@ create table public.generated_occurrences (
   task_name      text        not null default '',
   created_at     timestamptz not null default now(),
   primary key (user_id, project_id, occurrence_key),
-  foreign key (user_id, project_id) references public.projects(user_id, id)
+  foreign key (user_id, project_id) references todo.projects(user_id, id)
     on delete cascade
 );
 ```
@@ -300,13 +302,13 @@ create table public.generated_occurrences (
 
 ```sql
 -- Speed up per-user project listing
-create index on public.projects(user_id);
+create index on todo.projects(user_id);
 
 -- Speed up active task queries by due date (overdue view, day view)
-create index on public.tasks(user_id, due_date);
+create index on todo.tasks(user_id, due_date);
 
 -- Speed up archive queries
-create index on public.archived_tasks(user_id, project_id, completed_at desc);
+create index on todo.archived_tasks(user_id, project_id, completed_at desc);
 ```
 
 ---
@@ -328,19 +330,19 @@ RLS.
 
 ```sql
 -- Example for projects (repeat pattern for all new tables)
-alter table public.projects enable row level security;
+alter table todo.projects enable row level security;
 
 create policy "Users can read own projects"
-  on public.projects for select using (auth.uid() = user_id);
+  on todo.projects for select using (auth.uid() = user_id);
 
 create policy "Users can insert own projects"
-  on public.projects for insert with check (auth.uid() = user_id);
+  on todo.projects for insert with check (auth.uid() = user_id);
 
 create policy "Users can update own projects"
-  on public.projects for update using (auth.uid() = user_id);
+  on todo.projects for update using (auth.uid() = user_id);
 
 create policy "Users can delete own projects"
-  on public.projects for delete using (auth.uid() = user_id);
+  on todo.projects for delete using (auth.uid() = user_id);
 
 -- Repeat for user_settings, tasks, archived_tasks, generated_occurrences
 ```
@@ -354,18 +356,18 @@ the new tables. It uses `on conflict do nothing` so it is safe to re-run.
 -- -----------------------------------------------------------------------
 -- 2a. user_settings
 -- -----------------------------------------------------------------------
-insert into public.user_settings (user_id, default_project_id, updated_at)
+insert into todo.user_settings (user_id, default_project_id, updated_at)
 select
   user_id,
   (state_data ->> 'defaultProjectId'),
   updated_at
-from todo_state
+from todo.todo_state
 on conflict (user_id) do nothing;
 
 -- -----------------------------------------------------------------------
 -- 2b. projects
 -- -----------------------------------------------------------------------
-insert into public.projects (user_id, id, name, inactive,
+insert into todo.projects (user_id, id, name, inactive,
                               last_generated_through, updated_at)
 select
   ts.user_id,
@@ -377,14 +379,14 @@ select
     (proj.value ->> 'updatedAt')::timestamptz,
     ts.updated_at
   )                                                    as updated_at
-from todo_state ts,
+from todo.todo_state ts,
      jsonb_each(ts.state_data -> 'projects') as proj(key, value)
 on conflict (user_id, id) do nothing;
 
 -- -----------------------------------------------------------------------
 -- 2c. active tasks
 -- -----------------------------------------------------------------------
-insert into public.tasks (user_id, project_id, id, name, due_date,
+insert into todo.tasks (user_id, project_id, id, name, due_date,
                            source, generated_key, pinned,
                            created_at, updated_at)
 select
@@ -408,7 +410,7 @@ select
     (task.value ->> 'updatedAt')::timestamptz,
     ts.updated_at
   )                                                    as updated_at
-from todo_state ts,
+from todo.todo_state ts,
      jsonb_each(ts.state_data -> 'projects') as proj(key, value),
      jsonb_each(proj.value -> 'tasks')        as task(key, value)
 where task.value ->> 'name' is not null
@@ -418,7 +420,7 @@ on conflict (user_id, project_id, id) do nothing;
 -- -----------------------------------------------------------------------
 -- 2d. archived tasks
 -- -----------------------------------------------------------------------
-insert into public.archived_tasks (user_id, project_id, id, name, due_date,
+insert into todo.archived_tasks (user_id, project_id, id, name, due_date,
                                     source, generated_key, pinned,
                                     completed_at, created_at, updated_at)
 select
@@ -443,7 +445,7 @@ select
     (task.value ->> 'updatedAt')::timestamptz,
     ts.updated_at
   )                                                     as updated_at
-from todo_state ts,
+from todo.todo_state ts,
      jsonb_each(ts.state_data -> 'projects')   as proj(key, value),
      jsonb_each(proj.value -> 'archived')       as task(key, value)
 where task.value ->> 'name' is not null
@@ -453,7 +455,7 @@ on conflict (user_id, project_id, id) do nothing;
 -- -----------------------------------------------------------------------
 -- 2e. generated occurrences
 -- -----------------------------------------------------------------------
-insert into public.generated_occurrences (user_id, project_id, occurrence_key,
+insert into todo.generated_occurrences (user_id, project_id, occurrence_key,
                                            task_id, due_date, task_name, created_at)
 select
   ts.user_id,
@@ -466,7 +468,7 @@ select
     (occ.value ->> 'createdAt')::timestamptz,
     ts.updated_at
   )                                                    as created_at
-from todo_state ts,
+from todo.todo_state ts,
      jsonb_each(ts.state_data -> 'projects')                 as proj(key, value),
      jsonb_each(proj.value -> 'generatedOccurrences')         as occ(key, value)
 on conflict (user_id, project_id, occurrence_key) do nothing;
@@ -483,7 +485,7 @@ with blob_projects as (
   select
     ts.user_id,
     count(*) as blob_project_count
-  from todo_state ts
+  from todo.todo_state ts
   cross join lateral jsonb_object_keys(coalesce(ts.state_data -> 'projects', '{}'::jsonb)) as proj_id
   group by ts.user_id
 ),
@@ -491,22 +493,22 @@ normalized_projects as (
   select
     user_id,
     count(*) as normalized_project_count
-  from public.projects
+  from todo.projects
   group by user_id
 )
 select
   ts.user_id,
   coalesce(bp.blob_project_count, 0) as blob_project_count,
   coalesce(np.normalized_project_count, 0) as normalized_project_count
-from todo_state ts
+from todo.todo_state ts
 left join blob_projects bp using (user_id)
 left join normalized_projects np using (user_id)
 order by ts.user_id;
 
 -- Spot-check a single user (replace the UUID)
-select * from public.projects  where user_id = '<uuid>';
-select * from public.tasks     where user_id = '<uuid>' limit 20;
-select * from public.archived_tasks where user_id = '<uuid>' limit 20;
+select * from todo.projects  where user_id = '<uuid>';
+select * from todo.tasks     where user_id = '<uuid>' limit 20;
+select * from todo.archived_tasks where user_id = '<uuid>' limit 20;
 ```
 
 ### Phase 4 — Update application code
@@ -537,8 +539,8 @@ policies on `todo_state` to make it read-only. This protects migrated data while
 keeping the old table available for rollback.
 
 ```sql
-drop policy if exists "Users can insert own todo state" on todo_state;
-drop policy if exists "Users can update own todo state" on todo_state;
+drop policy if exists "Users can insert own todo state" on todo.todo_state;
+drop policy if exists "Users can update own todo state" on todo.todo_state;
 ```
 
 ### Phase 6 — Drop `todo_state` (after soak period)
@@ -547,7 +549,7 @@ After a suitable soak period (e.g. two weeks) with no rollback incidents, drop t
 table.
 
 ```sql
-drop table todo_state;
+drop table todo.todo_state;
 ```
 
 ---
