@@ -13,7 +13,7 @@
 --   3. Confirm the table and policies appear under Table Editor / Auth policies.
 
 -- 1. Project config table (1:1 per user+project)
-create table if not exists public.project_configs (
+create table if not exists todo.project_configs (
   user_id     uuid        not null references auth.users(id) on delete cascade,
   project_id  text        not null,
   config_text text        not null default '',
@@ -22,39 +22,39 @@ create table if not exists public.project_configs (
 );
 
 -- 2. Keep updated_at current on every update
-create or replace function public.set_project_configs_updated_at()
+create or replace function todo.set_project_configs_updated_at()
 returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
   return new;
 end $$;
 
-drop trigger if exists trg_project_configs_updated_at on public.project_configs;
+drop trigger if exists trg_project_configs_updated_at on todo.project_configs;
 
 create trigger trg_project_configs_updated_at
-before update on public.project_configs
-for each row execute function public.set_project_configs_updated_at();
+before update on todo.project_configs
+for each row execute function todo.set_project_configs_updated_at();
 
 -- 3. Row Level Security — users may only access their own rows
-alter table public.project_configs enable row level security;
+alter table todo.project_configs enable row level security;
 
-drop policy if exists "Users can read own project configs"   on public.project_configs;
-drop policy if exists "Users can insert own project configs"  on public.project_configs;
-drop policy if exists "Users can update own project configs"  on public.project_configs;
-drop policy if exists "Users can delete own project configs"  on public.project_configs;
+drop policy if exists "Users can read own project configs"   on todo.project_configs;
+drop policy if exists "Users can insert own project configs"  on todo.project_configs;
+drop policy if exists "Users can update own project configs"  on todo.project_configs;
+drop policy if exists "Users can delete own project configs"  on todo.project_configs;
 
 create policy "Users can read own project configs"
-  on public.project_configs for select
+  on todo.project_configs for select
   using (auth.uid() = user_id);
 
 create policy "Users can insert own project configs"
-  on public.project_configs for insert
+  on todo.project_configs for insert
   with check (auth.uid() = user_id);
 
 create policy "Users can update own project configs"
-  on public.project_configs for update
+  on todo.project_configs for update
   using (auth.uid() = user_id);
 
 create policy "Users can delete own project configs"
-  on public.project_configs for delete
+  on todo.project_configs for delete
   using (auth.uid() = user_id);
