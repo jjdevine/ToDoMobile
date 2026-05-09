@@ -1018,15 +1018,33 @@ select {
   color: var(--accent);
 }
 
+.task-btn.end-of-day:hover {
+  border-color: #a78bfa;
+  color: #a78bfa;
+}
+
 .task-card.pinned {
   border-color: rgba(108, 140, 255, 0.55);
   box-shadow: inset 0 1px 0 rgba(214, 222, 255, 0.06), 0 0 0 1px rgba(108, 140, 255, 0.12);
+}
+
+.task-card.end-of-day {
+  border-color: rgba(167, 139, 250, 0.45);
+  box-shadow: inset 0 1px 0 rgba(220, 210, 255, 0.05), 0 0 0 1px rgba(167, 139, 250, 0.10);
 }
 
 .pin-badge {
   flex-shrink: 0;
   font-size: 0.75rem;
   color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.end-of-day-badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: #a78bfa;
   font-weight: 600;
   white-space: nowrap;
 }
