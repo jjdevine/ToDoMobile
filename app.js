@@ -681,12 +681,12 @@
       generatedOccurrencesRes,
       descriptionsRes,
     ] = await Promise.all([
-      supabase.from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
-      supabase.from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
-      supabase.from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, created_at, updated_at").eq("user_id", userId),
-      supabase.from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, completed_at, created_at, updated_at").eq("user_id", userId),
-      supabase.from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
-      supabase.from(DESCRIPTIONS_TABLE).select("project_id, task_id, body").eq("user_id", userId),
+      supabase.schema("todo").from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
+      supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, completed_at, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
+      supabase.schema("todo").from(DESCRIPTIONS_TABLE).select("project_id, task_id, body").eq("user_id", userId),
     ]);
 
     const firstError = [
@@ -727,10 +727,10 @@
         remoteArchivedTasksRes,
         remoteGeneratedOccurrencesRes,
       ] = await Promise.all([
-        supabase.from(PROJECTS_TABLE).select("id").eq("user_id", userId),
-        supabase.from(TASKS_TABLE).select("project_id, id").eq("user_id", userId),
-        supabase.from(ARCHIVED_TASKS_TABLE).select("project_id, id").eq("user_id", userId),
-        supabase.from(GENERATED_OCCURRENCES_TABLE).select("project_id, occurrence_key").eq("user_id", userId),
+        supabase.schema("todo").from(PROJECTS_TABLE).select("id").eq("user_id", userId),
+        supabase.schema("todo").from(TASKS_TABLE).select("project_id, id").eq("user_id", userId),
+        supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("project_id, id").eq("user_id", userId),
+        supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("project_id, occurrence_key").eq("user_id", userId),
       ]);
 
       const remoteFetchError = [
@@ -753,21 +753,21 @@
       (remoteProjectsRes.data || []).forEach((row) => {
         if (!localProjectIds.has(row.id)) {
           deleteOperations.push(
-            supabase.from(PROJECTS_TABLE).delete().eq("user_id", userId).eq("id", row.id)
+            supabase.schema("todo").from(PROJECTS_TABLE).delete().eq("user_id", userId).eq("id", row.id)
           );
         }
       });
       (remoteTasksRes.data || []).forEach((row) => {
         if (!localTaskKeys.has(row.project_id + "::" + row.id)) {
           deleteOperations.push(
-            supabase.from(TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
+            supabase.schema("todo").from(TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
           );
         }
       });
       (remoteArchivedTasksRes.data || []).forEach((row) => {
         if (!localArchivedTaskKeys.has(row.project_id + "::" + row.id)) {
           deleteOperations.push(
-            supabase.from(ARCHIVED_TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
+            supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
           );
         }
       });
@@ -794,20 +794,20 @@
       }
 
       const upsertOperations = [
-        supabase.from(USER_SETTINGS_TABLE).upsert(rows.userSettings, { onConflict: "user_id" }),
+        supabase.schema("todo").from(USER_SETTINGS_TABLE).upsert(rows.userSettings, { onConflict: "user_id" }),
       ];
       if (rows.projects.length) {
-        upsertOperations.push(supabase.from(PROJECTS_TABLE).upsert(rows.projects, { onConflict: "user_id,id" }));
+        upsertOperations.push(supabase.schema("todo").from(PROJECTS_TABLE).upsert(rows.projects, { onConflict: "user_id,id" }));
       }
       if (rows.tasks.length) {
-        upsertOperations.push(supabase.from(TASKS_TABLE).upsert(rows.tasks, { onConflict: "user_id,project_id,id" }));
+        upsertOperations.push(supabase.schema("todo").from(TASKS_TABLE).upsert(rows.tasks, { onConflict: "user_id,project_id,id" }));
       }
       if (rows.archivedTasks.length) {
-        upsertOperations.push(supabase.from(ARCHIVED_TASKS_TABLE).upsert(rows.archivedTasks, { onConflict: "user_id,project_id,id" }));
+        upsertOperations.push(supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).upsert(rows.archivedTasks, { onConflict: "user_id,project_id,id" }));
       }
       if (rows.generatedOccurrences.length) {
         upsertOperations.push(
-          supabase.from(GENERATED_OCCURRENCES_TABLE).upsert(rows.generatedOccurrences, { onConflict: "user_id,project_id,occurrence_key" })
+          supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).upsert(rows.generatedOccurrences, { onConflict: "user_id,project_id,occurrence_key" })
         );
       }
 
@@ -1124,7 +1124,7 @@
   async function upsertTaskDescription(projectId, taskId, body) {
     if (!supabase || !currentUser || !projectId || !taskId) return;
     try {
-      const { error } = await supabase.from(DESCRIPTIONS_TABLE).upsert({
+      const { error } = await supabase.schema("todo").from(DESCRIPTIONS_TABLE).upsert({
         project_id: projectId,
         task_id: taskId,
         user_id: currentUser.id,
@@ -1142,6 +1142,7 @@
     if (!supabase || !currentUser || !projectId || !taskId) return;
     try {
       const { error } = await supabase
+        .schema("todo")
         .from(DESCRIPTIONS_TABLE)
         .delete()
         .eq("project_id", projectId)
@@ -1355,7 +1356,7 @@
   async function upsertProjectConfigToDb(projectId, configText) {
     if (!supabase || !currentUser) return;
     try {
-      const { error } = await supabase.from(PROJECT_CONFIGS_TABLE).upsert({
+      const { error } = await supabase.schema("todo").from(PROJECT_CONFIGS_TABLE).upsert({
         user_id: currentUser.id,
         project_id: projectId,
         config_text: configText,
