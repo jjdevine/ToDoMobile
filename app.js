@@ -8,6 +8,7 @@
   const TASKS_TABLE = "tasks";
   const ARCHIVED_TASKS_TABLE = "archived_tasks";
   const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
+  const TASK_TOMBSTONES_TABLE = "task_tombstones";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const TOAST_DISPLAY_MS = 4000;
@@ -116,6 +117,8 @@
       generatedOccurrences: {},
       lastGeneratedThrough: null,
       updatedAt: nowIso(),
+      deletedTasks: {},
+      deletedArchivedTasks: {},
     };
   }
 
@@ -305,6 +308,8 @@
       generatedOccurrences: normalizeGeneratedOccurrences(rawProject.generatedOccurrences),
       lastGeneratedThrough: isDateKey(rawProject.lastGeneratedThrough) ? rawProject.lastGeneratedThrough : null,
       updatedAt: typeof rawProject.updatedAt === "string" ? rawProject.updatedAt : nowIso(),
+      deletedTasks: normalizeTimestampMap(rawProject.deletedTasks),
+      deletedArchivedTasks: normalizeTimestampMap(rawProject.deletedArchivedTasks),
     };
   }
 
@@ -395,15 +400,20 @@
     const normalizedLocal = normalizeProjectState(projectId, localProject);
     const normalizedRemote = normalizeProjectState(projectId, remoteProject);
 
+    const mergedDeletedTasks = mergeTimestampMaps(normalizedLocal.deletedTasks, normalizedRemote.deletedTasks);
+    const mergedDeletedArchivedTasks = mergeTimestampMaps(normalizedLocal.deletedArchivedTasks, normalizedRemote.deletedArchivedTasks);
+
     return {
       projectId,
       name: normalizedRemote.name || normalizedLocal.name || "",
       inactive: compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0 ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
-      tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks),
-      archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived),
+      tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, mergedDeletedTasks),
+      archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, mergedDeletedArchivedTasks),
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
       lastGeneratedThrough: maxDateKey(normalizedLocal.lastGeneratedThrough, normalizedRemote.lastGeneratedThrough),
       updatedAt: laterIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt),
+      deletedTasks: mergedDeletedTasks,
+      deletedArchivedTasks: mergedDeletedArchivedTasks,
     };
   }
 
@@ -504,6 +514,7 @@
       tasks: [],
       archivedTasks: [],
       generatedOccurrences: [],
+      tombstones: [],
     };
 
     Object.keys(normalizedState.projects).forEach((projectId) => {
@@ -565,6 +576,26 @@
           created_at: occurrence.createdAt || nowIso(),
         });
       });
+
+      Object.keys(project.deletedTasks || {}).forEach((taskId) => {
+        rows.tombstones.push({
+          user_id: userId,
+          project_id: projectId,
+          task_id: taskId,
+          is_archived: false,
+          deleted_at: project.deletedTasks[taskId],
+        });
+      });
+
+      Object.keys(project.deletedArchivedTasks || {}).forEach((taskId) => {
+        rows.tombstones.push({
+          user_id: userId,
+          project_id: projectId,
+          task_id: taskId,
+          is_archived: true,
+          deleted_at: project.deletedArchivedTasks[taskId],
+        });
+      });
     });
 
     return rows;
@@ -579,6 +610,7 @@
     const payloadArchivedTasks = Array.isArray(payload.archivedTasks) ? payload.archivedTasks : [];
     const payloadGeneratedOccurrences = Array.isArray(payload.generatedOccurrences) ? payload.generatedOccurrences : [];
     const payloadDescriptions = Array.isArray(payload.descriptions) ? payload.descriptions : [];
+    const payloadTombstones = Array.isArray(payload.tombstones) ? payload.tombstones : [];
 
     if (payload.userSettings) {
       nextState.defaultProjectId =
@@ -689,6 +721,22 @@
       nextState.updatedAt = laterIso(nextState.updatedAt, createdAt);
     });
 
+    payloadTombstones.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.task_id !== "string") return;
+      const projectId = row.project_id;
+      if (!projectsById[projectId]) {
+        projectsById[projectId] = createEmptyProjectState(projectId, "");
+      }
+      const deletedAt = typeof row.deleted_at === "string" ? row.deleted_at : nowIso();
+      if (row.is_archived) {
+        projectsById[projectId].deletedArchivedTasks = projectsById[projectId].deletedArchivedTasks || {};
+        projectsById[projectId].deletedArchivedTasks[row.task_id] = deletedAt;
+      } else {
+        projectsById[projectId].deletedTasks = projectsById[projectId].deletedTasks || {};
+        projectsById[projectId].deletedTasks[row.task_id] = deletedAt;
+      }
+    });
+
     nextState.projects = projectsById;
     return normalizeState(nextState);
   }
@@ -703,12 +751,14 @@
       tasksRes,
       archivedTasksRes,
       generatedOccurrencesRes,
+      tombstonesRes,
     ] = await Promise.all([
       supabase.schema("todo").from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
+      supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("project_id, task_id, is_archived, deleted_at").eq("user_id", userId),
     ]);
 
     const firstError = [
@@ -717,6 +767,7 @@
       tasksRes.error,
       archivedTasksRes.error,
       generatedOccurrencesRes.error,
+      tombstonesRes.error,
     ].find(Boolean);
 
     if (firstError) {
@@ -730,6 +781,7 @@
       archivedTasks: archivedTasksRes.data,
       generatedOccurrences: generatedOccurrencesRes.data,
       descriptions: [],
+      tombstones: tombstonesRes.data || [],
     });
   }
 
@@ -832,6 +884,11 @@
       if (rows.generatedOccurrences.length) {
         upsertOperations.push(
           supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).upsert(rows.generatedOccurrences, { onConflict: "user_id,project_id,occurrence_key" })
+        );
+      }
+      if (rows.tombstones.length) {
+        upsertOperations.push(
+          supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).upsert(rows.tombstones, { onConflict: "user_id,project_id,task_id,is_archived" })
         );
       }
 
@@ -3542,6 +3599,8 @@
     if (!confirm('Delete "' + task.name + '" permanently? This will not move it to the archive.')) return;
 
     const timestamp = nowIso();
+    projectState.deletedTasks = projectState.deletedTasks || {};
+    projectState.deletedTasks[taskId] = timestamp;
     delete projectState.tasks[taskId];
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
@@ -3560,6 +3619,8 @@
     if (!confirm('Delete archived task "' + task.name + '"?')) return;
 
     const timestamp = nowIso();
+    projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
+    projectState.deletedArchivedTasks[taskId] = timestamp;
     delete projectState.archived[taskId];
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
@@ -3578,7 +3639,9 @@
     if (!confirm("Delete the entire archive for this project?")) return;
 
     const timestamp = nowIso();
+    projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
     archiveIds.forEach((taskId) => {
+      projectState.deletedArchivedTasks[taskId] = timestamp;
       delete projectState.archived[taskId];
       // Remove the cloud description for each deleted task (fire-and-forget).
       deleteTaskDescription(currentProjectId, taskId);
@@ -3690,7 +3753,9 @@
     projectArchives.forEach(({ project, archiveIds }) => {
       if (!archiveIds.length) return;
       const projectState = ensureProjectState(project.id, "");
+      projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
       archiveIds.forEach((taskId) => {
+        projectState.deletedArchivedTasks[taskId] = timestamp;
         delete projectState.archived[taskId];
         deleteTaskDescription(project.id, taskId);
       });

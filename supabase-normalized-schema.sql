@@ -235,6 +235,46 @@ create policy "Users can delete own generated occurrences"
   using (auth.uid() = user_id);
 
 -- ============================================================================
+-- 6. TASK_TOMBSTONES TABLE
+-- ============================================================================
+-- Records each permanent task deletion so that the deletion propagates to all
+-- other devices during sync. When a device deletes a task, a tombstone row is
+-- written here. Other devices fetch these rows on pull and use them to remove
+-- locally-cached copies, ensuring deletions are not silently reverted by the
+-- "local wins when only local has it" merge rule.
+create table if not exists todo.task_tombstones (
+  user_id     uuid        not null references auth.users(id) on delete cascade,
+  project_id  text        not null,
+  task_id     text        not null,
+  is_archived boolean     not null default false,
+  deleted_at  timestamptz not null,
+  primary key (user_id, project_id, task_id, is_archived)
+);
+
+alter table todo.task_tombstones enable row level security;
+
+drop policy if exists "Users can read own task tombstones" on todo.task_tombstones;
+drop policy if exists "Users can insert own task tombstones" on todo.task_tombstones;
+drop policy if exists "Users can update own task tombstones" on todo.task_tombstones;
+drop policy if exists "Users can delete own task tombstones" on todo.task_tombstones;
+
+create policy "Users can read own task tombstones"
+  on todo.task_tombstones for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own task tombstones"
+  on todo.task_tombstones for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own task tombstones"
+  on todo.task_tombstones for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own task tombstones"
+  on todo.task_tombstones for delete
+  using (auth.uid() = user_id);
+
+-- ============================================================================
 -- Grant table-level permissions
 -- ============================================================================
 grant select, insert, update, delete on all tables in schema todo to anon, authenticated, service_role;
