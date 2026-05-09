@@ -28,6 +28,10 @@ single JSONB object. Its logical shape (derived from `app.js`) is:
   "version": 1,
   "updatedAt": "<ISO timestamp>",
   "defaultProjectId": "<project id or null>",
+  "deletedProjectIds": {
+    "<project_id>": "<ISO deletion timestamp>"
+    // ... project tombstones for merge conflict resolution
+  },
   "projects": {
     "<project_id>": {
       "projectId": "<project_id>",
@@ -134,9 +138,9 @@ The `state_data` blob grows in four independent dimensions, **none of which is b
 * **Generated occurrences** — every time a recurring task is generated, an entry is
   appended to `generatedOccurrences`. A project with five daily tasks generates ~1,825
   entries per year; this map is never trimmed.
-* **Tombstones** (`deletedTaskIds`, `deletedArchiveIds`) — deletion records are kept
-  forever to support merge conflict resolution across devices. They accumulate without
-  any expiry.
+* **Tombstones** (`deletedProjectIds`, `deletedTaskIds`, `deletedArchiveIds`) —
+  deletion records are kept forever to support merge conflict resolution across
+  devices. They accumulate without any expiry.
 
 A power user with many projects and years of history could easily exceed **1–5 MB per
 row**. PostgreSQL stores large JSONB values via its TOAST mechanism (transparent
@@ -280,11 +284,13 @@ create table public.generated_occurrences (
 | No database-level constraints on task fields | `NOT NULL`, `CHECK`, and FK constraints enforced by PostgreSQL |
 | Full-blob replace on every save | Row-level `upsert` / `delete` per changed entity |
 | Tombstones required for merge conflict resolution | Deletes are permanent; no tombstones needed |
-| `task_descriptions` inconsistently separate | `task_descriptions` FK can reference `tasks(user_id, project_id, id)` |
+| `task_descriptions` inconsistently separate | Keep table initially, then add `project_id` and FK to `tasks(user_id, project_id, id)` |
 
 ### 3.2 What stays the same
 
-* `task_descriptions` — already normalized; no changes required.
+* `task_descriptions` — keep as-is initially to reduce migration risk; then add
+  `project_id` and a FK to `tasks(user_id, project_id, id)` after app writes to
+  normalized task rows.
 * `project_configs` — already normalized; no changes required.
 * RLS pattern — each new table uses the same `auth.uid() = user_id` pattern.
 * Offline-first model — the app can continue to use `localStorage` for local state and
@@ -472,14 +478,30 @@ Run the following queries to confirm row counts match expectations before any ap
 code changes are deployed.
 
 ```sql
--- Compare project counts per user
+-- Compare project counts per user (blob vs normalized)
+with blob_projects as (
+  select
+    ts.user_id,
+    count(*) as blob_project_count
+  from todo_state ts
+  cross join lateral jsonb_object_keys(coalesce(ts.state_data -> 'projects', '{}'::jsonb)) as proj_id
+  group by ts.user_id
+),
+normalized_projects as (
+  select
+    user_id,
+    count(*) as normalized_project_count
+  from public.projects
+  group by user_id
+)
 select
   ts.user_id,
-  jsonb_object_keys(ts.state_data -> 'projects') is not null as blob_has_projects,
-  count(p.id) as normalized_count
+  coalesce(bp.blob_project_count, 0) as blob_project_count,
+  coalesce(np.normalized_project_count, 0) as normalized_project_count
 from todo_state ts
-left join public.projects p using (user_id)
-group by ts.user_id;
+left join blob_projects bp using (user_id)
+left join normalized_projects np using (user_id)
+order by ts.user_id;
 
 -- Spot-check a single user (replace the UUID)
 select * from public.projects  where user_id = '<uuid>';
@@ -499,11 +521,14 @@ blob. Key changes required:
 * Replace the `mergeStates()` tombstone logic with database-level deletes; concurrent
   delete-then-recreate conflicts are resolved by `updated_at` comparison on the row
   itself.
-* Update the `upsertTaskDescription()` call to reference `tasks(user_id, project_id,
-  id)` so orphan descriptions are prevented.
+* Add `project_id` to `task_descriptions`, backfill it from migrated task rows, and
+  then add an FK to `tasks(user_id, project_id, id)` so orphan descriptions are
+  prevented.
 
-The in-memory `appState` object and its merge logic can remain unchanged during the
-transition — only the persistence layer needs to change.
+Most of the in-memory `appState` object can remain unchanged during the transition,
+but once normalized tables are the source of truth the tombstone maps
+(`deletedProjectIds`, `deletedTaskIds`, `deletedArchiveIds`) and blob merge logic
+should be retired from the sync path.
 
 ### Phase 5 — Remove write access to `todo_state`
 
