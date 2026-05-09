@@ -719,6 +719,7 @@
     try {
       const userId = currentUser.id;
       const rows = buildNormalizedRowsFromState(appState);
+      if (!rows.userSettings) return false;
 
       const [
         remoteProjectsRes,
@@ -915,7 +916,7 @@
         });
       }
 
-      function diffEntityMaps(localMap, remoteMap, entityLabel) {
+      function collectEntityDifferences(localMap, remoteMap, entityLabel) {
         const allIds = new Set(
           Object.keys(localMap || {}).concat(Object.keys(remoteMap || {}))
         );
@@ -959,13 +960,13 @@
         });
       }
 
-      diffEntityMaps(
+      collectEntityDifferences(
         localProject.tasks,
         remoteProject.tasks,
         "task"
       );
 
-      diffEntityMaps(
+      collectEntityDifferences(
         localProject.archived,
         remoteProject.archived,
         "completed task"
