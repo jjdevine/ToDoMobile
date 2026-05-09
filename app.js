@@ -3,7 +3,11 @@
 
   const STORAGE_KEY = "task_planner_state_v1";
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
-  const TABLE_NAME = "todo_state";
+  const USER_SETTINGS_TABLE = "user_settings";
+  const PROJECTS_TABLE = "projects";
+  const TASKS_TABLE = "tasks";
+  const ARCHIVED_TASKS_TABLE = "archived_tasks";
+  const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
   const DESCRIPTIONS_TABLE = "task_descriptions";
   const PROJECT_CONFIGS_TABLE = "project_configs";
   const SAVE_DELAY_MS = 2000;
@@ -86,7 +90,6 @@
       updatedAt: nowIso(),
       projects: {},
       defaultProjectId: null,
-      deletedProjectIds: {},
     };
   }
 
@@ -98,8 +101,6 @@
       tasks: {},
       archived: {},
       generatedOccurrences: {},
-      deletedTaskIds: {},
-      deletedArchiveIds: {},
       lastGeneratedThrough: null,
       updatedAt: nowIso(),
     };
@@ -288,8 +289,6 @@
       tasks: normalizeTaskMap(rawProject.tasks, projectId, false),
       archived: normalizeTaskMap(rawProject.archived, projectId, true),
       generatedOccurrences: normalizeGeneratedOccurrences(rawProject.generatedOccurrences),
-      deletedTaskIds: normalizeTimestampMap(rawProject.deletedTaskIds),
-      deletedArchiveIds: normalizeTimestampMap(rawProject.deletedArchiveIds),
       lastGeneratedThrough: isDateKey(rawProject.lastGeneratedThrough) ? rawProject.lastGeneratedThrough : null,
       updatedAt: typeof rawProject.updatedAt === "string" ? rawProject.updatedAt : nowIso(),
     };
@@ -303,7 +302,6 @@
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
     normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
-    normalized.deletedProjectIds = normalizeTimestampMap(rawState.deletedProjectIds);
 
     if (isPlainObject(rawState.projects)) {
       Object.keys(rawState.projects).forEach((projectId) => {
@@ -383,18 +381,13 @@
     const normalizedLocal = normalizeProjectState(projectId, localProject);
     const normalizedRemote = normalizeProjectState(projectId, remoteProject);
 
-    const deletedTaskIds = mergeTimestampMaps(normalizedLocal.deletedTaskIds, normalizedRemote.deletedTaskIds);
-    const deletedArchiveIds = mergeTimestampMaps(normalizedLocal.deletedArchiveIds, normalizedRemote.deletedArchiveIds);
-
     return {
       projectId,
       name: normalizedRemote.name || normalizedLocal.name || "",
       inactive: compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0 ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
-      tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, deletedTaskIds),
-      archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, deletedArchiveIds),
+      tasks: mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks),
+      archived: mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived),
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
-      deletedTaskIds,
-      deletedArchiveIds,
       lastGeneratedThrough: maxDateKey(normalizedLocal.lastGeneratedThrough, normalizedRemote.lastGeneratedThrough),
       updatedAt: laterIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt),
     };
@@ -406,20 +399,9 @@
     const merged = createEmptyState();
     const projectIds = new Set(Object.keys(local.projects).concat(Object.keys(remote.projects)));
 
-    const deletedProjectIds = mergeTimestampMaps(local.deletedProjectIds, remote.deletedProjectIds);
-    merged.deletedProjectIds = deletedProjectIds;
-
     projectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
       const remoteProject = remote.projects[projectId];
-      const singleSourceProject = localProject && remoteProject
-        ? null // both exist and will be merged below
-        : (localProject || remoteProject);
-      const projectUpdatedAt = singleSourceProject
-        ? singleSourceProject.updatedAt
-        : laterIso(localProject && localProject.updatedAt, remoteProject && remoteProject.updatedAt);
-      const deletionTime = deletedProjectIds[projectId];
-      if (deletionTime && compareIso(deletionTime, projectUpdatedAt) >= 0) return;
       merged.projects[projectId] = mergeProjectStates(projectId, localProject, remoteProject);
     });
 
@@ -485,19 +467,354 @@
     saveStateLocal();
   }
 
+  function buildNormalizedRowsFromState(state) {
+    const normalizedState = normalizeState(state);
+    const userId = currentUser ? currentUser.id : null;
+    if (!userId) {
+      return {
+        userSettings: null,
+        projects: [],
+        tasks: [],
+        archivedTasks: [],
+        generatedOccurrences: [],
+      };
+    }
+
+    const rows = {
+      userSettings: {
+        user_id: userId,
+        default_project_id: normalizedState.defaultProjectId,
+        updated_at: normalizedState.updatedAt || nowIso(),
+      },
+      projects: [],
+      tasks: [],
+      archivedTasks: [],
+      generatedOccurrences: [],
+    };
+
+    Object.keys(normalizedState.projects).forEach((projectId) => {
+      const project = normalizeProjectState(projectId, normalizedState.projects[projectId]);
+
+      rows.projects.push({
+        user_id: userId,
+        id: projectId,
+        name: project.name || "",
+        inactive: !!project.inactive,
+        last_generated_through: project.lastGeneratedThrough,
+        updated_at: project.updatedAt || normalizedState.updatedAt || nowIso(),
+      });
+
+      Object.keys(project.tasks || {}).forEach((taskId) => {
+        const task = project.tasks[taskId];
+        rows.tasks.push({
+          user_id: userId,
+          project_id: projectId,
+          id: task.id,
+          name: task.name || "",
+          due_date: task.dueDate,
+          source: task.source === "generated" ? "generated" : "manual",
+          generated_key: task.generatedKey || null,
+          pinned: !!task.pinned,
+          created_at: task.createdAt || task.updatedAt || nowIso(),
+          updated_at: task.updatedAt || nowIso(),
+        });
+      });
+
+      Object.keys(project.archived || {}).forEach((taskId) => {
+        const task = project.archived[taskId];
+        rows.archivedTasks.push({
+          user_id: userId,
+          project_id: projectId,
+          id: task.id,
+          name: task.name || "",
+          due_date: task.dueDate,
+          source: task.source === "generated" ? "generated" : "manual",
+          generated_key: task.generatedKey || null,
+          pinned: !!task.pinned,
+          completed_at: task.completedAt || null,
+          created_at: task.createdAt || task.updatedAt || nowIso(),
+          updated_at: task.updatedAt || nowIso(),
+        });
+      });
+
+      Object.keys(project.generatedOccurrences || {}).forEach((occurrenceKey) => {
+        const occurrence = project.generatedOccurrences[occurrenceKey];
+        rows.generatedOccurrences.push({
+          user_id: userId,
+          project_id: projectId,
+          occurrence_key: occurrenceKey,
+          task_id: occurrence.taskId || null,
+          due_date: occurrence.dueDate || null,
+          task_name: occurrence.taskName || "",
+          created_at: occurrence.createdAt || nowIso(),
+        });
+      });
+    });
+
+    return rows;
+  }
+
+  function buildStateFromNormalizedRows(payload) {
+    const nextState = createEmptyState();
+    const projectsById = {};
+    const descriptionsByTaskKey = {};
+    const payloadProjects = Array.isArray(payload.projects) ? payload.projects : [];
+    const payloadTasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+    const payloadArchivedTasks = Array.isArray(payload.archivedTasks) ? payload.archivedTasks : [];
+    const payloadGeneratedOccurrences = Array.isArray(payload.generatedOccurrences) ? payload.generatedOccurrences : [];
+    const payloadDescriptions = Array.isArray(payload.descriptions) ? payload.descriptions : [];
+
+    if (payload.userSettings) {
+      nextState.defaultProjectId =
+        typeof payload.userSettings.default_project_id === "string" && payload.userSettings.default_project_id
+          ? payload.userSettings.default_project_id
+          : null;
+      nextState.updatedAt =
+        typeof payload.userSettings.updated_at === "string" && payload.userSettings.updated_at
+          ? payload.userSettings.updated_at
+          : nextState.updatedAt;
+    }
+
+    payloadProjects.forEach((row) => {
+      if (!row || typeof row.id !== "string" || !row.id) return;
+      const projectId = row.id;
+      projectsById[projectId] = {
+        ...createEmptyProjectState(projectId, row.name || ""),
+        name: typeof row.name === "string" ? row.name : "",
+        inactive: !!row.inactive,
+        lastGeneratedThrough:
+          typeof row.last_generated_through === "string" && isDateKey(row.last_generated_through)
+            ? row.last_generated_through
+            : null,
+        updatedAt:
+          typeof row.updated_at === "string" && row.updated_at
+            ? row.updated_at
+            : nowIso(),
+      };
+      nextState.updatedAt = laterIso(nextState.updatedAt, projectsById[projectId].updatedAt);
+    });
+
+    payloadDescriptions.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.task_id !== "string") return;
+      const key = row.project_id + "::" + row.task_id;
+      descriptionsByTaskKey[key] = typeof row.body === "string" ? row.body : "";
+    });
+
+    payloadTasks.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.id !== "string") return;
+      const projectId = row.project_id;
+      if (!projectsById[projectId]) {
+        projectsById[projectId] = createEmptyProjectState(projectId, "");
+      }
+      const record = normalizeTaskRecord({
+        id: row.id,
+        projectId: row.project_id,
+        name: row.name,
+        description: descriptionsByTaskKey[projectId + "::" + row.id] || "",
+        dueDate: row.due_date,
+        source: row.source,
+        generatedKey: row.generated_key,
+        pinned: row.pinned,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }, projectId, false);
+      if (!record || !record.name) return;
+      projectsById[projectId].tasks[row.id] = record;
+      projectsById[projectId].updatedAt = laterIso(projectsById[projectId].updatedAt, record.updatedAt);
+      nextState.updatedAt = laterIso(nextState.updatedAt, record.updatedAt);
+    });
+
+    payloadArchivedTasks.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.id !== "string") return;
+      const projectId = row.project_id;
+      if (!projectsById[projectId]) {
+        projectsById[projectId] = createEmptyProjectState(projectId, "");
+      }
+      const record = normalizeTaskRecord({
+        id: row.id,
+        projectId: row.project_id,
+        name: row.name,
+        description: descriptionsByTaskKey[projectId + "::" + row.id] || "",
+        dueDate: row.due_date,
+        source: row.source,
+        generatedKey: row.generated_key,
+        pinned: row.pinned,
+        completedAt: row.completed_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }, projectId, true);
+      if (!record || !record.name) return;
+      projectsById[projectId].archived[row.id] = record;
+      projectsById[projectId].updatedAt = laterIso(projectsById[projectId].updatedAt, record.updatedAt);
+      nextState.updatedAt = laterIso(nextState.updatedAt, record.updatedAt);
+    });
+
+    payloadGeneratedOccurrences.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.occurrence_key !== "string") return;
+      const projectId = row.project_id;
+      if (!projectsById[projectId]) {
+        projectsById[projectId] = createEmptyProjectState(projectId, "");
+      }
+      const createdAt = typeof row.created_at === "string" ? row.created_at : nowIso();
+      projectsById[projectId].generatedOccurrences[row.occurrence_key] = {
+        createdAt,
+        taskId: typeof row.task_id === "string" && row.task_id ? row.task_id : null,
+        dueDate: isDateKey(row.due_date) ? row.due_date : null,
+        taskName: typeof row.task_name === "string" ? row.task_name : "",
+      };
+      nextState.updatedAt = laterIso(nextState.updatedAt, createdAt);
+    });
+
+    nextState.projects = projectsById;
+    return normalizeState(nextState);
+  }
+
+  async function fetchNormalizedRemoteState() {
+    if (!supabase || !currentUser) return null;
+    const userId = currentUser.id;
+
+    const [
+      userSettingsRes,
+      projectsRes,
+      tasksRes,
+      archivedTasksRes,
+      generatedOccurrencesRes,
+      descriptionsRes,
+    ] = await Promise.all([
+      supabase.from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
+      supabase.from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
+      supabase.from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, created_at, updated_at").eq("user_id", userId),
+      supabase.from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, completed_at, created_at, updated_at").eq("user_id", userId),
+      supabase.from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
+      supabase.from(DESCRIPTIONS_TABLE).select("project_id, task_id, body").eq("user_id", userId),
+    ]);
+
+    const firstError = [
+      userSettingsRes.error,
+      projectsRes.error,
+      tasksRes.error,
+      archivedTasksRes.error,
+      generatedOccurrencesRes.error,
+      descriptionsRes.error,
+    ].find(Boolean);
+
+    if (firstError) {
+      throw firstError;
+    }
+
+    return buildStateFromNormalizedRows({
+      userSettings: userSettingsRes.data,
+      projects: projectsRes.data,
+      tasks: tasksRes.data,
+      archivedTasks: archivedTasksRes.data,
+      generatedOccurrences: generatedOccurrencesRes.data,
+      descriptions: descriptionsRes.data,
+    });
+  }
+
   async function pushState() {
     if (!supabase || !currentUser || syncInFlight) return false;
 
     syncInFlight = true;
     try {
-      const { error } = await supabase.from(TABLE_NAME).upsert({
-        user_id: currentUser.id,
-        state_data: appState,
-        updated_at: appState.updatedAt,
+      const userId = currentUser.id;
+      const rows = buildNormalizedRowsFromState(appState);
+      if (!rows.userSettings) return false;
+
+      const [
+        remoteProjectsRes,
+        remoteTasksRes,
+        remoteArchivedTasksRes,
+        remoteGeneratedOccurrencesRes,
+      ] = await Promise.all([
+        supabase.from(PROJECTS_TABLE).select("id").eq("user_id", userId),
+        supabase.from(TASKS_TABLE).select("project_id, id").eq("user_id", userId),
+        supabase.from(ARCHIVED_TASKS_TABLE).select("project_id, id").eq("user_id", userId),
+        supabase.from(GENERATED_OCCURRENCES_TABLE).select("project_id, occurrence_key").eq("user_id", userId),
+      ]);
+
+      const remoteFetchError = [
+        remoteProjectsRes.error,
+        remoteTasksRes.error,
+        remoteArchivedTasksRes.error,
+        remoteGeneratedOccurrencesRes.error,
+      ].find(Boolean);
+      if (remoteFetchError) {
+        console.error("Sync push error:", remoteFetchError.message);
+        return false;
+      }
+
+      const localProjectIds = new Set(rows.projects.map((row) => row.id));
+      const localTaskKeys = new Set(rows.tasks.map((row) => row.project_id + "::" + row.id));
+      const localArchivedTaskKeys = new Set(rows.archivedTasks.map((row) => row.project_id + "::" + row.id));
+      const localOccurrenceKeys = new Set(rows.generatedOccurrences.map((row) => row.project_id + "::" + row.occurrence_key));
+
+      const deleteOperations = [];
+      (remoteProjectsRes.data || []).forEach((row) => {
+        if (!localProjectIds.has(row.id)) {
+          deleteOperations.push(
+            supabase.from(PROJECTS_TABLE).delete().eq("user_id", userId).eq("id", row.id)
+          );
+        }
+      });
+      (remoteTasksRes.data || []).forEach((row) => {
+        if (!localTaskKeys.has(row.project_id + "::" + row.id)) {
+          deleteOperations.push(
+            supabase.from(TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
+          );
+        }
+      });
+      (remoteArchivedTasksRes.data || []).forEach((row) => {
+        if (!localArchivedTaskKeys.has(row.project_id + "::" + row.id)) {
+          deleteOperations.push(
+            supabase.from(ARCHIVED_TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
+          );
+        }
+      });
+      (remoteGeneratedOccurrencesRes.data || []).forEach((row) => {
+        if (!localOccurrenceKeys.has(row.project_id + "::" + row.occurrence_key)) {
+          deleteOperations.push(
+            supabase
+              .from(GENERATED_OCCURRENCES_TABLE)
+              .delete()
+              .eq("user_id", userId)
+              .eq("project_id", row.project_id)
+              .eq("occurrence_key", row.occurrence_key)
+          );
+        }
       });
 
-      if (error) {
-        console.error("Sync push error:", error.message);
+      if (deleteOperations.length) {
+        const deleteResults = await Promise.all(deleteOperations);
+        const deleteError = deleteResults.map((result) => result.error).find(Boolean);
+        if (deleteError) {
+          console.error("Sync push error:", deleteError.message);
+          return false;
+        }
+      }
+
+      const upsertOperations = [
+        supabase.from(USER_SETTINGS_TABLE).upsert(rows.userSettings, { onConflict: "user_id" }),
+      ];
+      if (rows.projects.length) {
+        upsertOperations.push(supabase.from(PROJECTS_TABLE).upsert(rows.projects, { onConflict: "user_id,id" }));
+      }
+      if (rows.tasks.length) {
+        upsertOperations.push(supabase.from(TASKS_TABLE).upsert(rows.tasks, { onConflict: "user_id,project_id,id" }));
+      }
+      if (rows.archivedTasks.length) {
+        upsertOperations.push(supabase.from(ARCHIVED_TASKS_TABLE).upsert(rows.archivedTasks, { onConflict: "user_id,project_id,id" }));
+      }
+      if (rows.generatedOccurrences.length) {
+        upsertOperations.push(
+          supabase.from(GENERATED_OCCURRENCES_TABLE).upsert(rows.generatedOccurrences, { onConflict: "user_id,project_id,occurrence_key" })
+        );
+      }
+
+      const upsertResults = await Promise.all(upsertOperations);
+      const upsertError = upsertResults.map((result) => result.error).find(Boolean);
+      if (upsertError) {
+        console.error("Sync push error:", upsertError.message);
         return false;
       }
 
@@ -514,26 +831,12 @@
     if (!supabase || !currentUser) return;
 
     try {
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("*")
-        .eq("user_id", currentUser.id)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Sync pull error:", error.message);
-        return;
-      }
-
-      if (!data || !data.state_data) return;
-      const remoteState = normalizeState(data.state_data);
-      if (!remoteState.updatedAt && data.updated_at) {
-        remoteState.updatedAt = data.updated_at;
-      }
+      const remoteState = await fetchNormalizedRemoteState();
+      if (!remoteState) return;
       appState = mergeStates(appState, remoteState);
       saveStateLocal();
     } catch (error) {
-      console.error("Sync pull exception:", error);
+      console.error("Sync pull error:", error.message || error);
     }
   }
 
@@ -555,21 +858,7 @@
   async function fetchRemoteStateRaw() {
     if (!supabase || !currentUser) return null;
     try {
-      const { data, error } = await supabase
-        .from(TABLE_NAME)
-        .select("*")
-        .eq("user_id", currentUser.id)
-        .maybeSingle();
-      if (error) {
-        console.error("Resync fetch error:", error.message);
-        return null;
-      }
-      if (!data || !data.state_data) return null;
-      const remoteState = normalizeState(data.state_data);
-      if (!remoteState.updatedAt && data.updated_at) {
-        remoteState.updatedAt = data.updated_at;
-      }
-      return remoteState;
+      return await fetchNormalizedRemoteState();
     } catch (error) {
       console.error("Resync fetch exception:", error);
       return null;
@@ -592,52 +881,42 @@
       const remoteProject = remote.projects[projectId];
 
       if (!localProject) {
-        // Project is only in remote — check if local has a deletion tombstone
-        const localDeletion = (local.deletedProjectIds || {})[projectId];
-        if (localDeletion && compareIso(localDeletion, remoteProject.updatedAt) >= 0) {
-          // Local deleted it more recently — local will push this deletion to remote
-          localNewer.push({
-            kind: "deleted",
-            label: remoteProject.name || projectId,
-            detail: "Project deleted locally",
-          });
-        } else {
-          // Remote has it and local doesn't (or remote is newer than local deletion)
-          const taskCount = Object.keys(remoteProject.tasks || {}).length;
-          remoteNewer.push({
-            kind: "project",
-            label: remoteProject.name || projectId,
-            detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-          });
-        }
+        const taskCount = Object.keys(remoteProject.tasks || {}).length;
+        remoteNewer.push({
+          kind: "project",
+          label: remoteProject.name || projectId,
+          detail: "Project exists remotely only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+        });
         return;
       }
 
       if (!remoteProject) {
-        // Project is only in local — check if remote has a deletion tombstone
-        const remoteDeletion = (remote.deletedProjectIds || {})[projectId];
-        if (remoteDeletion && compareIso(remoteDeletion, localProject.updatedAt) >= 0) {
-          // Remote deleted it more recently — local will receive this deletion
-          remoteNewer.push({
-            kind: "deleted",
-            label: localProject.name || projectId,
-            detail: "Project deleted remotely",
-          });
-        } else {
-          // Local has it and remote doesn't (or local is newer than remote deletion)
-          const taskCount = Object.keys(localProject.tasks || {}).length;
-          localNewer.push({
-            kind: "project",
-            label: localProject.name || projectId,
-            detail: "New project (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-          });
-        }
+        const taskCount = Object.keys(localProject.tasks || {}).length;
+        localNewer.push({
+          kind: "project",
+          label: localProject.name || projectId,
+          detail: "Project exists locally only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+        });
         return;
       }
 
       const projectName = remoteProject.name || localProject.name || projectId;
+      const projectCmp = compareIso(localProject.updatedAt, remoteProject.updatedAt);
+      if (projectCmp > 0) {
+        localNewer.push({
+          kind: "project",
+          label: localProject.name || projectId,
+          detail: "Project metadata modified",
+        });
+      } else if (projectCmp < 0) {
+        remoteNewer.push({
+          kind: "project",
+          label: remoteProject.name || projectId,
+          detail: "Project metadata modified",
+        });
+      }
 
-      function diffEntityMaps(localMap, remoteMap, localDeletedMap, remoteDeletedMap, entityLabel) {
+      function collectEntityDifferences(localMap, remoteMap, entityLabel) {
         const allIds = new Set(
           Object.keys(localMap || {}).concat(Object.keys(remoteMap || {}))
         );
@@ -647,43 +926,19 @@
           const remoteEntity = (remoteMap || {})[id];
 
           if (!localEntity && remoteEntity) {
-            const localDeletion = (localDeletedMap || {})[id];
-            if (localDeletion && compareIso(localDeletion, remoteEntity.updatedAt) >= 0) {
-              // Local deleted it more recently — local will push this deletion to remote
-              localNewer.push({
-                kind: "deleted",
-                label: remoteEntity.name || id,
-                projectName,
-                detail: entityLabel + " deleted locally",
-              });
-            } else {
-              // Remote has it and local doesn't (or remote is newer than local deletion)
-              remoteNewer.push({
-                kind: "task",
-                label: remoteEntity.name || id,
-                projectName,
-                detail: "New " + entityLabel,
-              });
-            }
+            remoteNewer.push({
+              kind: "task",
+              label: remoteEntity.name || id,
+              projectName,
+              detail: entityLabel + " exists remotely only",
+            });
           } else if (localEntity && !remoteEntity) {
-            const remoteDeletion = (remoteDeletedMap || {})[id];
-            if (remoteDeletion && compareIso(remoteDeletion, localEntity.updatedAt) >= 0) {
-              // Remote deleted it more recently — local will receive this deletion
-              remoteNewer.push({
-                kind: "deleted",
-                label: localEntity.name || id,
-                projectName,
-                detail: entityLabel + " deleted remotely",
-              });
-            } else {
-              // Local has it and remote doesn't (or local is newer than remote deletion)
-              localNewer.push({
-                kind: "task",
-                label: localEntity.name || id,
-                projectName,
-                detail: "New " + entityLabel,
-              });
-            }
+            localNewer.push({
+              kind: "task",
+              label: localEntity.name || id,
+              projectName,
+              detail: entityLabel + " exists locally only",
+            });
           } else if (localEntity && remoteEntity) {
             const cmp = compareIso(localEntity.updatedAt, remoteEntity.updatedAt);
             if (cmp > 0) {
@@ -705,19 +960,15 @@
         });
       }
 
-      diffEntityMaps(
+      collectEntityDifferences(
         localProject.tasks,
         remoteProject.tasks,
-        localProject.deletedTaskIds,
-        remoteProject.deletedTaskIds,
         "task"
       );
 
-      diffEntityMaps(
+      collectEntityDifferences(
         localProject.archived,
         remoteProject.archived,
-        localProject.deletedArchiveIds,
-        remoteProject.deletedArchiveIds,
         "completed task"
       );
     });
@@ -849,12 +1100,13 @@
 
   // --- Task description API (task_descriptions table) ---
 
-  async function fetchTaskDescription(taskId) {
-    if (!supabase || !currentUser) return null;
+  async function fetchTaskDescription(projectId, taskId) {
+    if (!supabase || !currentUser || !projectId || !taskId) return null;
     try {
       const { data, error } = await supabase
         .from(DESCRIPTIONS_TABLE)
         .select("body")
+        .eq("project_id", projectId)
         .eq("task_id", taskId)
         .eq("user_id", currentUser.id)
         .maybeSingle();
@@ -869,10 +1121,11 @@
     }
   }
 
-  async function upsertTaskDescription(taskId, body) {
-    if (!supabase || !currentUser) return;
+  async function upsertTaskDescription(projectId, taskId, body) {
+    if (!supabase || !currentUser || !projectId || !taskId) return;
     try {
       const { error } = await supabase.from(DESCRIPTIONS_TABLE).upsert({
+        project_id: projectId,
         task_id: taskId,
         user_id: currentUser.id,
         body,
@@ -885,12 +1138,13 @@
     }
   }
 
-  async function deleteTaskDescription(taskId) {
-    if (!supabase || !currentUser) return;
+  async function deleteTaskDescription(projectId, taskId) {
+    if (!supabase || !currentUser || !projectId || !taskId) return;
     try {
       const { error } = await supabase
         .from(DESCRIPTIONS_TABLE)
         .delete()
+        .eq("project_id", projectId)
         .eq("task_id", taskId)
         .eq("user_id", currentUser.id);
       if (error) {
@@ -1593,7 +1847,6 @@
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
     const deletionTime = nowIso();
-    appState.deletedProjectIds[projectId] = deletionTime;
     delete appState.projects[projectId];
     delete projectConfigTexts[projectId];
     delete projectConfigs[projectId];
@@ -2568,7 +2821,7 @@
     // Persist the long description to the dedicated cloud table (fire-and-forget).
     // Always upsert so that a subsequent edit that clears the description is
     // guaranteed to have a row to update rather than leaving stale data.
-    upsertTaskDescription(taskId, description);
+    upsertTaskDescription(targetProjectId, taskId, description);
 
     return true;
   }
@@ -2925,7 +3178,6 @@
 
     const timestamp = nowIso();
     delete projectState.tasks[taskId];
-    projectState.deletedTaskIds[taskId] = timestamp;
     projectState.archived[taskId] = {
       ...task,
       completedAt: timestamp,
@@ -2955,7 +3207,7 @@
       const descriptionEl = $("#edit-task-description-input");
       const editingId = taskId; // captured before the await for stale-check
       descriptionEl.disabled = true;
-      const cloudBody = await fetchTaskDescription(taskId);
+      const cloudBody = await fetchTaskDescription(currentProjectId, taskId);
       descriptionEl.disabled = false;
       // Only overwrite if still editing the same task (modal not closed/changed)
       if (editTaskId === editingId && cloudBody !== null) {
@@ -3045,7 +3297,7 @@
     renderCurrentScreen();
 
     // Persist the long description to the dedicated cloud table (fire-and-forget).
-    upsertTaskDescription(savedTaskId, description);
+    upsertTaskDescription(currentProjectId, savedTaskId, description);
   }
 
   function formatDeferDateLabel(dateKey) {
@@ -3151,13 +3403,12 @@
 
     const timestamp = nowIso();
     delete projectState.tasks[taskId];
-    projectState.deletedTaskIds[taskId] = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderCurrentScreen();
 
     // Remove the cloud description for this task (fire-and-forget).
-    deleteTaskDescription(taskId);
+    deleteTaskDescription(currentProjectId, taskId);
   }
 
   function deleteArchivedTask(taskId) {
@@ -3170,13 +3421,12 @@
 
     const timestamp = nowIso();
     delete projectState.archived[taskId];
-    projectState.deletedArchiveIds[taskId] = timestamp;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderArchiveScreen();
 
     // Remove the cloud description for this task (fire-and-forget).
-    deleteTaskDescription(taskId);
+    deleteTaskDescription(currentProjectId, taskId);
   }
 
   function clearArchive() {
@@ -3190,9 +3440,8 @@
     const timestamp = nowIso();
     archiveIds.forEach((taskId) => {
       delete projectState.archived[taskId];
-      projectState.deletedArchiveIds[taskId] = timestamp;
       // Remove the cloud description for each deleted task (fire-and-forget).
-      deleteTaskDescription(taskId);
+      deleteTaskDescription(currentProjectId, taskId);
     });
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
@@ -3303,8 +3552,7 @@
       const projectState = ensureProjectState(project.id, "");
       archiveIds.forEach((taskId) => {
         delete projectState.archived[taskId];
-        projectState.deletedArchiveIds[taskId] = timestamp;
-        deleteTaskDescription(taskId);
+        deleteTaskDescription(project.id, taskId);
       });
       touchProject(projectState, timestamp);
     });
