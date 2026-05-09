@@ -4061,5 +4061,16 @@
     await enterApp();
   }
 
+  fetch("./manifest.json")
+    .then((r) => r.json())
+    .then((data) => {
+      const el = document.getElementById("build-version");
+      if (el && data.buildTime) {
+        const d = new Date(data.buildTime);
+        el.textContent = "build\u00a0" + d.toISOString().slice(0, 19).replace("T", "\u00a0") + "Z";
+      }
+    })
+    .catch(() => {});
+
   init();
 })();
