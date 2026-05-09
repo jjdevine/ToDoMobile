@@ -11,9 +11,6 @@
 --   2. Paste the contents of this file and click Run.
 --   3. Confirm the table and policies appear under Table Editor / Auth policies.
 
--- Ensure dedicated ToDo schema exists
-create schema if not exists todo;
-
 -- 1. Long-description table (1:1 per user+task)
 create table if not exists todo.task_descriptions (
   task_id   text        not null,

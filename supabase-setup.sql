@@ -2,7 +2,6 @@
 
 create schema if not exists todo;
 grant usage on schema todo to anon, authenticated, service_role;
-grant select, insert, update, delete on all tables in schema todo to anon, authenticated, service_role;
 alter default privileges in schema todo grant select, insert, update, delete on tables to anon, authenticated, service_role;
 
 create table if not exists todo.todo_state (
@@ -10,6 +9,8 @@ create table if not exists todo.todo_state (
   state_data jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+
+grant select, insert, update, delete on all tables in schema todo to anon, authenticated, service_role;
 
 alter table todo.todo_state enable row level security;
 

@@ -12,9 +12,6 @@
 --   2. Paste the contents of this file and click Run.
 --   3. Confirm the table and policies appear under Table Editor / Auth policies.
 
--- Ensure dedicated ToDo schema exists
-create schema if not exists todo;
-
 -- 1. Project config table (1:1 per user+project)
 create table if not exists todo.project_configs (
   user_id     uuid        not null references auth.users(id) on delete cascade,
