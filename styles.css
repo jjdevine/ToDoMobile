@@ -1548,10 +1548,16 @@ select {
 .resync-item {
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.45rem 0.75rem;
+}
+
+.resync-item-main {
+  display: flex;
+  flex-direction: column;
 }
 
 .resync-item-name {
@@ -1563,6 +1569,13 @@ select {
 .resync-item-meta {
   font-size: 0.78rem;
   color: var(--text-muted);
+}
+
+.resync-item-action-btn {
+  width: auto;
+  align-self: flex-start;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
 }
 
 .resync-in-sync {
