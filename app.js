@@ -1189,7 +1189,7 @@
     } else {
       statusEl.textContent =
         "Found " + total + " difference" + (total === 1 ? "" : "s") + ". " +
-        "Use Discard local for locally-only items, Sync both sides to merge changes, or Pull remote only to replace local data.";
+        "Use Discard local for locally-only items, Sync both sides to merge changes, or Pull remote only to discard local differences and make local state exactly match remote.";
       confirmBtn.classList.remove("hidden");
       pullRemoteBtn.classList.remove("hidden");
     }
@@ -1295,7 +1295,7 @@
     generateTasksForAllProjects();
     saveStateLocal();
     renderCurrentScreen();
-    setSyncStatus("Remote state pulled.");
+    setSyncStatus("Remote pull complete. Local state now exactly matches remote.");
 
     confirmBtn.disabled = false;
     cancelBtn.disabled = false;
