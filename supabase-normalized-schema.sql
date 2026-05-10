@@ -1,8 +1,9 @@
--- Normalized schema for ToDoMobile
--- Run this in your Supabase SQL editor AFTER running supabase-setup.sql
--- This creates the normalized relational tables for projects, tasks, and user settings
+-- Normalized schema for ToDoMobile (definitive)
+-- Run this in your Supabase SQL editor.
+-- This script is self-contained and creates the full normalized schema.
 
 -- Ensure schema permissions are set
+create schema if not exists todo;
 grant usage on schema todo to anon, authenticated, service_role;
 alter default privileges in schema todo grant select, insert, update, delete on tables to anon, authenticated, service_role;
 
