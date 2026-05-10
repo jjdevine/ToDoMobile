@@ -13,6 +13,7 @@ alter default privileges in schema todo grant select, insert, update, delete on 
 create table if not exists todo.user_settings (
   user_id              uuid        not null references auth.users(id) on delete cascade primary key,
   default_project_id   text,
+  default_project_updated_at timestamptz not null default now(),
   updated_at           timestamptz not null default now()
 );
 

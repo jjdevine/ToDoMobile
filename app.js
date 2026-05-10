@@ -99,11 +99,13 @@
   }
 
   function createEmptyState() {
+    const timestamp = nowIso();
     return {
       version: 1,
-      updatedAt: nowIso(),
+      updatedAt: timestamp,
       projects: {},
       defaultProjectId: null,
+      defaultProjectUpdatedAt: timestamp,
     };
   }
 
@@ -321,6 +323,10 @@
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
     normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
+    normalized.defaultProjectUpdatedAt =
+      typeof rawState.defaultProjectUpdatedAt === "string"
+        ? rawState.defaultProjectUpdatedAt
+        : normalized.updatedAt;
 
     if (isPlainObject(rawState.projects)) {
       Object.keys(rawState.projects).forEach((projectId) => {
@@ -461,6 +467,8 @@
     const remote = normalizeState(remoteState);
     const merged = createEmptyState();
     const projectIds = new Set(Object.keys(local.projects).concat(Object.keys(remote.projects)));
+    const localDefaultUpdatedAt = local.defaultProjectUpdatedAt || local.updatedAt;
+    const remoteDefaultUpdatedAt = remote.defaultProjectUpdatedAt || remote.updatedAt;
 
     projectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
@@ -469,7 +477,13 @@
     });
 
     merged.updatedAt = laterIso(local.updatedAt, remote.updatedAt);
-    merged.defaultProjectId = compareIso(local.updatedAt, remote.updatedAt) >= 0 ? local.defaultProjectId : remote.defaultProjectId;
+    if (compareIso(localDefaultUpdatedAt, remoteDefaultUpdatedAt) >= 0) {
+      merged.defaultProjectId = local.defaultProjectId;
+      merged.defaultProjectUpdatedAt = localDefaultUpdatedAt;
+    } else {
+      merged.defaultProjectId = remote.defaultProjectId;
+      merged.defaultProjectUpdatedAt = remoteDefaultUpdatedAt;
+    }
     return normalizeState(merged);
   }
 
@@ -547,6 +561,7 @@
       userSettings: {
         user_id: userId,
         default_project_id: normalizedState.defaultProjectId,
+        default_project_updated_at: normalizedState.defaultProjectUpdatedAt || normalizedState.updatedAt || nowIso(),
         updated_at: normalizedState.updatedAt || nowIso(),
       },
       projects: [],
@@ -656,6 +671,12 @@
         typeof payload.userSettings.default_project_id === "string" && payload.userSettings.default_project_id
           ? payload.userSettings.default_project_id
           : null;
+      nextState.defaultProjectUpdatedAt =
+        typeof payload.userSettings.default_project_updated_at === "string" && payload.userSettings.default_project_updated_at
+          ? payload.userSettings.default_project_updated_at
+          : typeof payload.userSettings.updated_at === "string" && payload.userSettings.updated_at
+            ? payload.userSettings.updated_at
+            : nextState.defaultProjectUpdatedAt;
       nextState.updatedAt =
         typeof payload.userSettings.updated_at === "string" && payload.userSettings.updated_at
           ? payload.userSettings.updated_at
@@ -792,7 +813,12 @@
       generatedOccurrencesRes,
       tombstonesRes,
     ] = await Promise.all([
-      supabase.schema("todo").from(USER_SETTINGS_TABLE).select("default_project_id, updated_at").eq("user_id", userId).maybeSingle(),
+      supabase
+        .schema("todo")
+        .from(USER_SETTINGS_TABLE)
+        .select("default_project_id, default_project_updated_at, updated_at")
+        .eq("user_id", userId)
+        .maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, completed_at, created_at, updated_at").eq("user_id", userId),
@@ -1291,6 +1317,7 @@
     }
     if (appState.defaultProjectId && !appState.projects[appState.defaultProjectId]) {
       appState.defaultProjectId = null;
+      appState.defaultProjectUpdatedAt = appState.updatedAt;
     }
     generateTasksForAllProjects();
     saveStateLocal();
@@ -1328,6 +1355,7 @@
       }
       if (appState.defaultProjectId === projectId) {
         appState.defaultProjectId = null;
+        appState.defaultProjectUpdatedAt = timestamp;
       }
       appState.updatedAt = timestamp;
     } else if (itemKind === "task" && taskId) {
@@ -2177,6 +2205,7 @@
     }
     if (appState.defaultProjectId === projectId) {
       appState.defaultProjectId = null;
+      appState.defaultProjectUpdatedAt = deletionTime;
     }
     appState.updatedAt = deletionTime;
     schedulePersist("Saving changes...");
@@ -2194,6 +2223,7 @@
 
     if (appState.defaultProjectId === projectId) {
       appState.defaultProjectId = null;
+      appState.defaultProjectUpdatedAt = appState.updatedAt;
     }
 
     schedulePersist("Project set to inactive.");
@@ -2223,15 +2253,19 @@
   }
 
   function setDefaultProject(projectId) {
+    const timestamp = nowIso();
     appState.defaultProjectId = projectId;
-    appState.updatedAt = nowIso();
+    appState.defaultProjectUpdatedAt = timestamp;
+    appState.updatedAt = timestamp;
     schedulePersist("Default project saved.");
     renderHome();
   }
 
   function clearDefaultProject() {
+    const timestamp = nowIso();
     appState.defaultProjectId = null;
-    appState.updatedAt = nowIso();
+    appState.defaultProjectUpdatedAt = timestamp;
+    appState.updatedAt = timestamp;
     schedulePersist("Default project cleared.");
     renderHome();
   }
