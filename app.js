@@ -1028,6 +1028,8 @@
           kind: "project",
           label: localProject.name || projectId,
           detail: "Project exists locally only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
+          projectId,
+          discardLocalOnly: true,
         });
         return;
       }
@@ -1048,7 +1050,7 @@
         });
       }
 
-      function collectEntityDifferences(localMap, remoteMap, entityLabel) {
+      function collectEntityDifferences(localMap, remoteMap, entityLabel, archived) {
         const allIds = new Set(
           Object.keys(localMap || {}).concat(Object.keys(remoteMap || {}))
         );
@@ -1070,6 +1072,10 @@
               label: localEntity.name || id,
               projectName,
               detail: entityLabel + " exists locally only",
+              projectId,
+              taskId: id,
+              archived: !!archived,
+              discardLocalOnly: true,
             });
           } else if (localEntity && remoteEntity) {
             const cmp = compareIso(localEntity.updatedAt, remoteEntity.updatedAt);
@@ -1095,13 +1101,15 @@
       collectEntityDifferences(
         localProject.tasks,
         remoteProject.tasks,
-        "task"
+        "task",
+        false
       );
 
       collectEntityDifferences(
         localProject.archived,
         remoteProject.archived,
-        "completed task"
+        "completed task",
+        true
       );
     });
 
@@ -1132,11 +1140,27 @@
       lines.push('<ul class="resync-item-list">');
       items.forEach((item) => {
         lines.push('<li class="resync-item">');
+        lines.push('<div class="resync-item-main">');
         lines.push('<span class="resync-item-name">' + escapeHtml(item.label) + "</span>");
         const meta = item.projectName
           ? escapeHtml(item.detail) + " &mdash; " + escapeHtml(item.projectName)
           : escapeHtml(item.detail);
         lines.push('<span class="resync-item-meta">' + meta + "</span>");
+        lines.push("</div>");
+        if (item.discardLocalOnly && item.projectId) {
+          const kind = item.kind === "project" ? "project" : "task";
+          lines.push(
+            '<button type="button" class="btn-secondary resync-item-action-btn" data-resync-action="discard-local" data-item-kind="' +
+              kind +
+              '" data-project-id="' +
+              escapeHtml(item.projectId) +
+              '" data-task-id="' +
+              escapeHtml(item.taskId || "") +
+              '" data-archived="' +
+              (item.archived ? "1" : "0") +
+              '">Discard local</button>'
+          );
+        }
         lines.push("</li>");
       });
       lines.push("</ul>");
@@ -1147,6 +1171,30 @@
     renderSection(localNewer, "Local is newer — remote will receive these changes", "resync-section-badge-local");
 
     return lines.join("\n");
+  }
+
+  function refreshResyncModalDiff(remoteState) {
+    const statusEl = $("#resync-status-text");
+    const diffEl = $("#resync-diff");
+    const confirmBtn = $("#confirm-resync-btn");
+    const pullRemoteBtn = $("#pull-remote-resync-btn");
+
+    const diff = diffLocalRemote(appState, remoteState);
+    const total = diff.remoteNewer.length + diff.localNewer.length;
+
+    if (total === 0) {
+      statusEl.textContent = "No differences found between local and remote state.";
+      confirmBtn.classList.add("hidden");
+      pullRemoteBtn.classList.add("hidden");
+    } else {
+      statusEl.textContent =
+        "Found " + total + " difference" + (total === 1 ? "" : "s") + ". " +
+        "Use Discard local for locally-only items, Sync both sides to merge changes, or Pull remote only to replace local data.";
+      confirmBtn.classList.remove("hidden");
+      pullRemoteBtn.classList.remove("hidden");
+    }
+
+    diffEl.innerHTML = buildResyncDiffHtml(diff);
   }
 
   function escapeHtml(str) {
@@ -1163,10 +1211,12 @@
     const statusEl = $("#resync-status-text");
     const diffEl = $("#resync-diff");
     const confirmBtn = $("#confirm-resync-btn");
+    const pullRemoteBtn = $("#pull-remote-resync-btn");
 
     statusEl.textContent = "Checking remote state\u2026";
     diffEl.innerHTML = "";
     confirmBtn.classList.add("hidden");
+    pullRemoteBtn.classList.add("hidden");
     pendingResyncRemoteState = null;
 
     $("#resync-modal").classList.remove("hidden");
@@ -1184,20 +1234,8 @@
       return;
     }
 
-    const diff = diffLocalRemote(appState, remoteState);
-    const total = diff.remoteNewer.length + diff.localNewer.length;
-
-    if (total === 0) {
-      statusEl.textContent = "No differences found between local and remote state.";
-    } else {
-      statusEl.textContent =
-        "Found " + total + " difference" + (total === 1 ? "" : "s") + ". " +
-        "Confirming will merge both sides to the most recent version of each item.";
-      confirmBtn.classList.remove("hidden");
-      pendingResyncRemoteState = remoteState;
-    }
-
-    diffEl.innerHTML = buildResyncDiffHtml(diff);
+    pendingResyncRemoteState = remoteState;
+    refreshResyncModalDiff(remoteState);
   }
 
   function closeResyncModal() {
@@ -1214,8 +1252,10 @@
 
     const confirmBtn = $("#confirm-resync-btn");
     const cancelBtn = $("#cancel-resync-btn");
+    const pullRemoteBtn = $("#pull-remote-resync-btn");
     confirmBtn.disabled = true;
     cancelBtn.disabled = true;
+    pullRemoteBtn.disabled = true;
 
     setSyncStatus("Resyncing\u2026");
     appState = mergeStates(appState, pendingResyncRemoteState);
@@ -1227,7 +1267,92 @@
 
     confirmBtn.disabled = false;
     cancelBtn.disabled = false;
+    pullRemoteBtn.disabled = false;
     closeResyncModal();
+  }
+
+  async function pullRemoteOverrideLocal() {
+    if (!pendingResyncRemoteState) {
+      closeResyncModal();
+      return;
+    }
+
+    const confirmBtn = $("#confirm-resync-btn");
+    const cancelBtn = $("#cancel-resync-btn");
+    const pullRemoteBtn = $("#pull-remote-resync-btn");
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    pullRemoteBtn.disabled = true;
+
+    setSyncStatus("Pulling remote state\u2026");
+    appState = normalizeState(pendingResyncRemoteState);
+    if (currentProjectId && !appState.projects[currentProjectId]) {
+      currentProjectId = null;
+    }
+    if (appState.defaultProjectId && !appState.projects[appState.defaultProjectId]) {
+      appState.defaultProjectId = null;
+    }
+    generateTasksForAllProjects();
+    saveStateLocal();
+    renderCurrentScreen();
+    setSyncStatus("Remote state pulled.");
+
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    pullRemoteBtn.disabled = false;
+    closeResyncModal();
+  }
+
+  function discardLocalOnlyResyncItem(event) {
+    const button = event.target.closest(".resync-item-action-btn");
+    if (!button || !pendingResyncRemoteState) return;
+    if (button.getAttribute("data-resync-action") !== "discard-local") return;
+
+    const itemKind = button.getAttribute("data-item-kind");
+    const projectId = button.getAttribute("data-project-id");
+    const taskId = button.getAttribute("data-task-id");
+    const archived = button.getAttribute("data-archived") === "1";
+    const timestamp = nowIso();
+
+    if (!projectId) return;
+
+    if (itemKind === "project") {
+      if (!appState.projects[projectId]) return;
+      delete appState.projects[projectId];
+      delete projectConfigTexts[projectId];
+      delete projectConfigs[projectId];
+      saveLocalProjectConfigs();
+      deleteProjectConfigFromDb(projectId);
+      if (currentProjectId === projectId) {
+        currentProjectId = null;
+      }
+      if (appState.defaultProjectId === projectId) {
+        appState.defaultProjectId = null;
+      }
+      appState.updatedAt = timestamp;
+    } else if (itemKind === "task" && taskId) {
+      const projectState = appState.projects[projectId];
+      if (!projectState) return;
+      if (archived) {
+        if (!projectState.archived[taskId]) return;
+        projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
+        projectState.deletedArchivedTasks[taskId] = timestamp;
+        delete projectState.archived[taskId];
+      } else {
+        if (!projectState.tasks[taskId]) return;
+        projectState.deletedTasks = projectState.deletedTasks || {};
+        projectState.deletedTasks[taskId] = timestamp;
+        delete projectState.tasks[taskId];
+      }
+      touchProject(projectState, timestamp);
+      deleteTaskDescription(projectId, taskId);
+    } else {
+      return;
+    }
+
+    saveStateLocal();
+    renderCurrentScreen();
+    refreshResyncModalDiff(pendingResyncRemoteState);
   }
 
   // --- Task description API (merged into tasks table) ---
@@ -4008,6 +4133,8 @@
 
     $("#cancel-resync-btn").addEventListener("click", closeResyncModal);
     $("#confirm-resync-btn").addEventListener("click", confirmResync);
+    $("#pull-remote-resync-btn").addEventListener("click", pullRemoteOverrideLocal);
+    $("#resync-diff").addEventListener("click", discardLocalOnlyResyncItem);
     $("#resync-modal").addEventListener("click", (event) => {
       if (event.target === $("#resync-modal")) {
         closeResyncModal();
