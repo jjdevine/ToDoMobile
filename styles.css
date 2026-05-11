@@ -1587,6 +1587,110 @@ select {
   padding: 0.5rem 0;
 }
 
+/* ── Home summary box ────────────────────────────────────── */
+.home-summary-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  margin-bottom: 1rem;
+}
+
+.home-summary-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}
+
+.home-summary-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+
+.home-summary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.home-summary-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.home-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.home-summary-table th,
+.home-summary-table td {
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.home-summary-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.home-summary-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.home-summary-table td:nth-child(2),
+.home-summary-table td:nth-child(3),
+.home-summary-table th:nth-child(2),
+.home-summary-table th:nth-child(3) {
+  text-align: center;
+  width: 6rem;
+}
+
+.home-summary-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--transition);
+}
+
+.home-summary-link:hover {
+  color: var(--accent-hover);
+}
+
+.home-summary-overdue {
+  color: var(--red);
+}
+
+.home-summary-overdue:hover {
+  color: #e07070;
+}
+
+.home-summary-due-today {
+  color: var(--yellow);
+}
+
+.home-summary-due-today:hover {
+  color: #f5d98a;
+}
+
+.home-summary-zero {
+  color: var(--text-muted);
+}
+
 /* ── Toast notification ──────────────────────────────────── */
 #app-toast {
   position: fixed;
