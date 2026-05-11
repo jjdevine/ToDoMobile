@@ -1657,12 +1657,12 @@ select {
 }
 
 .home-summary-link {
-  background: transparent;
+  background: none;
   border: none;
   cursor: pointer;
   font: inherit;
   color: var(--accent);
-  padding: var(--home-summary-cell-padding);
+  padding: 0;
   transition: color var(--transition), background var(--transition);
 }
 
@@ -1674,6 +1674,7 @@ select {
 .home-summary-cell-button {
   display: block;
   width: 100%;
+  padding: var(--home-summary-cell-padding);
   text-align: inherit;
 }
 
