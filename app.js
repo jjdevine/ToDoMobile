@@ -2073,6 +2073,107 @@
     return chip;
   }
 
+  function renderHomeSummary(projects) {
+    const summaryEl = $("#home-summary");
+    if (!summaryEl) return;
+    summaryEl.innerHTML = "";
+
+    if (!projects.length) return;
+
+    const projectsWithStats = projects.map((p) => ({ project: p, stats: buildProjectStats(p.id) }))
+      .filter(({ stats }) => stats.overdue > 0 || stats.dueToday > 0);
+
+    const totalOverdue = projectsWithStats.reduce((sum, { stats }) => sum + stats.overdue, 0);
+    const totalDueToday = projectsWithStats.reduce((sum, { stats }) => sum + stats.dueToday, 0);
+
+    const box = document.createElement("div");
+    box.className = "home-summary-box";
+
+    if (totalOverdue === 0 && totalDueToday === 0) {
+      const msg = document.createElement("p");
+      msg.className = "home-summary-empty";
+      msg.textContent = "No tasks overdue or due today";
+      box.appendChild(msg);
+    } else {
+      const header = document.createElement("div");
+      header.className = "home-summary-header";
+      const titleEl = document.createElement("span");
+      titleEl.className = "home-summary-title";
+      titleEl.textContent = "Tasks Overdue & Due Today";
+      header.appendChild(titleEl);
+      const chips = document.createElement("span");
+      chips.className = "home-summary-chips";
+      if (totalOverdue > 0) chips.appendChild(createChip("overdue", String(totalOverdue)));
+      if (totalDueToday > 0) chips.appendChild(createChip("due today", String(totalDueToday)));
+      header.appendChild(chips);
+      box.appendChild(header);
+
+      const table = document.createElement("table");
+      table.className = "home-summary-table";
+
+      const thead = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      ["Project", "Overdue", "Due Today"].forEach((label) => {
+        const th = document.createElement("th");
+        th.textContent = label;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      projectsWithStats.forEach(({ project, stats }) => {
+        const row = document.createElement("tr");
+
+        const nameCell = document.createElement("td");
+        const nameBtn = document.createElement("button");
+        nameBtn.className = "home-summary-link";
+        nameBtn.textContent = project.name;
+        nameBtn.addEventListener("click", () => openProject(project.id));
+        nameCell.appendChild(nameBtn);
+        row.appendChild(nameCell);
+
+        const overdueCell = document.createElement("td");
+        if (stats.overdue > 0) {
+          const overdueBtn = document.createElement("button");
+          overdueBtn.className = "home-summary-link home-summary-overdue";
+          overdueBtn.textContent = String(stats.overdue);
+          overdueBtn.addEventListener("click", () => {
+            currentProjectId = project.id;
+            openOverdue();
+          });
+          overdueCell.appendChild(overdueBtn);
+        } else {
+          overdueCell.textContent = "0";
+          overdueCell.className = "home-summary-zero";
+        }
+        row.appendChild(overdueCell);
+
+        const dueTodayCell = document.createElement("td");
+        if (stats.dueToday > 0) {
+          const dueTodayBtn = document.createElement("button");
+          dueTodayBtn.className = "home-summary-link home-summary-due-today";
+          dueTodayBtn.textContent = String(stats.dueToday);
+          dueTodayBtn.addEventListener("click", () => {
+            currentProjectId = project.id;
+            openDay(todayKey());
+          });
+          dueTodayCell.appendChild(dueTodayBtn);
+        } else {
+          dueTodayCell.textContent = "0";
+          dueTodayCell.className = "home-summary-zero";
+        }
+        row.appendChild(dueTodayCell);
+
+        tbody.appendChild(row);
+      });
+      table.appendChild(tbody);
+      box.appendChild(table);
+    }
+
+    summaryEl.appendChild(box);
+  }
+
   function renderHome() {
     closeCreateProjectPanel();
     const projectGrid = $("#project-grid");
@@ -2087,6 +2188,8 @@
     if (homeAddTaskBtn) {
       homeAddTaskBtn.classList.toggle("hidden", projects.length === 0);
     }
+
+    renderHomeSummary(projects);
 
     if (!projects.length) {
       emptyState.classList.remove("hidden");
