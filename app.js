@@ -2219,7 +2219,7 @@
 
     const showHiddenBtn = $("#show-hidden-projects-btn");
     if (showHiddenBtn) {
-      const hiddenCount = Array.from(hiddenProjectIds).filter((id) => appState.projects[id] && !appState.projects[id].inactive).length;
+      const hiddenCount = hiddenProjectIds.size === 0 ? 0 : Array.from(hiddenProjectIds).filter((id) => appState.projects[id] && !appState.projects[id].inactive).length;
       showHiddenBtn.classList.toggle("hidden", hiddenCount === 0 && !showHiddenProjects);
       showHiddenBtn.textContent = showHiddenProjects ? "Hide hidden projects" : "Show hidden projects (" + hiddenCount + ")";
     }
@@ -2290,7 +2290,7 @@
         unhideButton.type = "button";
         unhideButton.className = "project-card-unhide";
         unhideButton.textContent = "Unhide";
-        unhideButton.title = "Show this project on the home screen on this device.";
+        unhideButton.title = "Unhide this project on this device.";
         unhideButton.addEventListener("click", (event) => {
           event.stopPropagation();
           unhideProject(project.id);
