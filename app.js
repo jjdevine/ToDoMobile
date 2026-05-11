@@ -94,6 +94,7 @@
   let projectConfigTexts = {};
   let hiddenProjectIds = new Set();
   let showHiddenProjects = false;
+  let showProjectActions = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
 
@@ -2208,19 +2209,42 @@
     const emptyState = $("#home-empty");
     projectGrid.innerHTML = "";
     const projects = getAllProjects();
+    const toggleProjectActionsBtn = $("#toggle-project-actions-btn");
+    if (toggleProjectActionsBtn) {
+      toggleProjectActionsBtn.textContent = showProjectActions ? "Hide Project Actions" : "Show Project Actions";
+      toggleProjectActionsBtn.setAttribute("aria-expanded", showProjectActions ? "true" : "false");
+    }
 
     const deleteAllArchivesBtn = $("#delete-all-archives-btn");
-    if (deleteAllArchivesBtn) deleteAllArchivesBtn.disabled = true;
+    if (deleteAllArchivesBtn) {
+      deleteAllArchivesBtn.disabled = true;
+      deleteAllArchivesBtn.classList.toggle("hidden", !showProjectActions);
+    }
+
+    const generateAllBtn = $("#generate-all-btn");
+    if (generateAllBtn) {
+      generateAllBtn.classList.toggle("hidden", !showProjectActions);
+    }
+
+    const createProjectBtn = $("#open-create-project-btn");
+    if (createProjectBtn) {
+      createProjectBtn.classList.toggle("hidden", !showProjectActions);
+    }
+
+    const downloadAllArchivesBtn = $("#download-all-archives-btn");
+    if (downloadAllArchivesBtn) {
+      downloadAllArchivesBtn.classList.toggle("hidden", !showProjectActions);
+    }
 
     const homeAddTaskBtn = $("#open-home-add-task-btn");
     if (homeAddTaskBtn) {
-      homeAddTaskBtn.classList.toggle("hidden", projects.length === 0);
+      homeAddTaskBtn.classList.toggle("hidden", !showProjectActions || projects.length === 0);
     }
 
     const showHiddenBtn = $("#show-hidden-projects-btn");
     if (showHiddenBtn) {
       const hiddenCount = hiddenProjectIds.size === 0 ? 0 : Array.from(hiddenProjectIds).filter((id) => appState.projects[id] && !appState.projects[id].inactive).length;
-      showHiddenBtn.classList.toggle("hidden", hiddenCount === 0 && !showHiddenProjects);
+      showHiddenBtn.classList.toggle("hidden", !showProjectActions || (hiddenCount === 0 && !showHiddenProjects));
       showHiddenBtn.textContent = showHiddenProjects ? "Hide hidden projects" : "Show hidden projects (" + hiddenCount + ")";
     }
 
@@ -2230,7 +2254,7 @@
       emptyState.classList.remove("hidden");
       const viewInactiveBtn = $("#view-inactive-btn");
       if (viewInactiveBtn) {
-        viewInactiveBtn.classList.toggle("hidden", getInactiveProjects().length === 0);
+        viewInactiveBtn.classList.toggle("hidden", !showProjectActions || getInactiveProjects().length === 0);
       }
       return;
     }
@@ -2346,7 +2370,7 @@
 
     const viewInactiveBtn = $("#view-inactive-btn");
     if (viewInactiveBtn) {
-      viewInactiveBtn.classList.toggle("hidden", getInactiveProjects().length === 0);
+      viewInactiveBtn.classList.toggle("hidden", !showProjectActions || getInactiveProjects().length === 0);
     }
   }
 
@@ -4262,6 +4286,10 @@
     eventsBound = true;
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
+    $("#toggle-project-actions-btn").addEventListener("click", () => {
+      showProjectActions = !showProjectActions;
+      renderHome();
+    });
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
