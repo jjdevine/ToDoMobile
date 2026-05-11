@@ -33,6 +33,7 @@
   --radius-sm: 8px;
   --max-width: 860px;
   --transition: 0.2s ease;
+  --home-summary-cell-padding: 0.35rem 0.65rem;
 }
 
 html { font-size: 16px; }
@@ -1639,7 +1640,7 @@ select {
 }
 
 .home-summary-table thead th {
-  padding: 0.35rem 0.65rem;
+  padding: var(--home-summary-cell-padding);
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.75rem;
@@ -1661,7 +1662,7 @@ select {
   cursor: pointer;
   font: inherit;
   color: var(--accent);
-  padding: 0.35rem 0.65rem;
+  padding: var(--home-summary-cell-padding);
   transition: color var(--transition), background var(--transition);
 }
 
