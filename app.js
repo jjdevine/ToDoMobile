@@ -3666,7 +3666,7 @@
     const totalOverdue = overdueTaskIds.length;
     if (!totalOverdue) return;
 
-    if (!confirm("Are you sure you definitely want to complete all " + totalOverdue + " overdue task" + (totalOverdue === 1 ? "" : "s") + " for this project?")) return;
+    if (!confirm(`Are you sure you definitely want to complete all ${totalOverdue} overdue task${totalOverdue === 1 ? "" : "s"} for this project?`)) return;
 
     const projectState = ensureProjectState(projectId, "");
     const timestamp = nowIso();
