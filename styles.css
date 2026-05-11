@@ -33,6 +33,7 @@
   --radius-sm: 8px;
   --max-width: 860px;
   --transition: 0.2s ease;
+  --home-summary-cell-padding: 0.35rem 0.65rem;
 }
 
 html { font-size: 16px; }
@@ -1626,27 +1627,25 @@ select {
 
 .home-summary-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.88rem;
 }
 
 .home-summary-table th,
 .home-summary-table td {
-  padding: 0.45rem 0.7rem;
+  padding: 0;
   text-align: left;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
 }
 
 .home-summary-table thead th {
+  padding: var(--home-summary-cell-padding);
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.home-summary-table tbody tr:last-child td {
-  border-bottom: none;
 }
 
 .home-summary-table td:nth-child(2),
@@ -1664,13 +1663,19 @@ select {
   font: inherit;
   color: var(--accent);
   padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  transition: color var(--transition);
+  transition: color var(--transition), background var(--transition);
 }
 
 .home-summary-link:hover {
   color: var(--accent-hover);
+  background: var(--surface-hover);
+}
+
+.home-summary-cell-button {
+  display: block;
+  width: 100%;
+  padding: var(--home-summary-cell-padding);
+  text-align: inherit;
 }
 
 .home-summary-overdue {
