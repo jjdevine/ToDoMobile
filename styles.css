@@ -26,7 +26,9 @@
   --red-deep-hover: rgba(102, 39, 39, 0.8);
   --red-border: rgba(177, 84, 84, 0.62);
   --red: #cf5c5c;
+  --red-hover: #e07070;
   --yellow: #f1cc6f;
+  --yellow-hover: #f5d98a;
   --radius: 12px;
   --radius-sm: 8px;
   --max-width: 860px;
@@ -1676,7 +1678,7 @@ select {
 }
 
 .home-summary-overdue:hover {
-  color: #e07070;
+  color: var(--red-hover);
 }
 
 .home-summary-due-today {
@@ -1684,7 +1686,7 @@ select {
 }
 
 .home-summary-due-today:hover {
-  color: #f5d98a;
+  color: var(--yellow-hover);
 }
 
 .home-summary-zero {
