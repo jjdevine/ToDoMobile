@@ -2127,42 +2127,36 @@
 
         const nameCell = document.createElement("td");
         const nameBtn = document.createElement("button");
-        nameBtn.className = "home-summary-link";
+        nameBtn.className = "home-summary-link home-summary-cell-button";
         nameBtn.textContent = project.name;
         nameBtn.addEventListener("click", () => openProject(project.id));
         nameCell.appendChild(nameBtn);
         row.appendChild(nameCell);
 
         const overdueCell = document.createElement("td");
-        if (stats.overdue > 0) {
-          const overdueBtn = document.createElement("button");
-          overdueBtn.className = "home-summary-link home-summary-overdue";
-          overdueBtn.textContent = String(stats.overdue);
-          overdueBtn.addEventListener("click", () => {
-            currentProjectId = project.id;
-            openOverdue();
-          });
-          overdueCell.appendChild(overdueBtn);
-        } else {
-          overdueCell.textContent = "0";
-          overdueCell.className = "home-summary-zero";
-        }
+        const overdueBtn = document.createElement("button");
+        overdueBtn.className = "home-summary-link home-summary-cell-button";
+        if (stats.overdue > 0) overdueBtn.classList.add("home-summary-overdue");
+        else overdueBtn.classList.add("home-summary-zero");
+        overdueBtn.textContent = String(stats.overdue);
+        overdueBtn.addEventListener("click", () => {
+          currentProjectId = project.id;
+          openOverdue();
+        });
+        overdueCell.appendChild(overdueBtn);
         row.appendChild(overdueCell);
 
         const dueTodayCell = document.createElement("td");
-        if (stats.dueToday > 0) {
-          const dueTodayBtn = document.createElement("button");
-          dueTodayBtn.className = "home-summary-link home-summary-due-today";
-          dueTodayBtn.textContent = String(stats.dueToday);
-          dueTodayBtn.addEventListener("click", () => {
-            currentProjectId = project.id;
-            openDay(todayKey());
-          });
-          dueTodayCell.appendChild(dueTodayBtn);
-        } else {
-          dueTodayCell.textContent = "0";
-          dueTodayCell.className = "home-summary-zero";
-        }
+        const dueTodayBtn = document.createElement("button");
+        dueTodayBtn.className = "home-summary-link home-summary-cell-button";
+        if (stats.dueToday > 0) dueTodayBtn.classList.add("home-summary-due-today");
+        else dueTodayBtn.classList.add("home-summary-zero");
+        dueTodayBtn.textContent = String(stats.dueToday);
+        dueTodayBtn.addEventListener("click", () => {
+          currentProjectId = project.id;
+          openDay(todayKey());
+        });
+        dueTodayCell.appendChild(dueTodayBtn);
         row.appendChild(dueTodayCell);
 
         tbody.appendChild(row);

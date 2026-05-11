@@ -1626,27 +1626,25 @@ select {
 
 .home-summary-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.88rem;
 }
 
 .home-summary-table th,
 .home-summary-table td {
-  padding: 0.45rem 0.7rem;
+  padding: 0;
   text-align: left;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
 }
 
 .home-summary-table thead th {
+  padding: 0.35rem 0.65rem;
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.home-summary-table tbody tr:last-child td {
-  border-bottom: none;
 }
 
 .home-summary-table td:nth-child(2),
@@ -1658,19 +1656,24 @@ select {
 }
 
 .home-summary-link {
-  background: none;
+  background: transparent;
   border: none;
   cursor: pointer;
   font: inherit;
   color: var(--accent);
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  transition: color var(--transition);
+  padding: 0.35rem 0.65rem;
+  transition: color var(--transition), background var(--transition);
 }
 
 .home-summary-link:hover {
   color: var(--accent-hover);
+  background: var(--surface-hover);
+}
+
+.home-summary-cell-button {
+  display: block;
+  width: 100%;
+  text-align: inherit;
 }
 
 .home-summary-overdue {
