@@ -279,6 +279,47 @@ select {
   color: var(--text);
 }
 
+.project-card-hide {
+  border: 1px solid rgba(100, 120, 180, 0.45);
+  border-radius: 999px;
+  background: rgba(30, 40, 80, 0.35);
+  color: #9bb0e0;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.project-card-hide:hover {
+  border-color: rgba(120, 150, 220, 0.75);
+  background: rgba(40, 55, 110, 0.5);
+  color: #c0d0f5;
+}
+
+.project-card-unhide {
+  border: 1px solid rgba(80, 160, 100, 0.5);
+  border-radius: 999px;
+  background: rgba(20, 60, 30, 0.35);
+  color: #7ec89a;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.project-card-unhide:hover {
+  border-color: rgba(100, 200, 130, 0.75);
+  background: rgba(30, 80, 45, 0.5);
+  color: #aae0be;
+}
+
+.project-card-hidden {
+  opacity: 0.65;
+  border-style: dashed;
+}
+
 .project-card-reactivate {
   font-size: 0.75rem;
   padding: 0.32rem 0.7rem;

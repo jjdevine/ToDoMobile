@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "task_planner_state_v1";
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
+  const HIDDEN_PROJECTS_STORAGE_KEY = "task_planner_hidden_projects_v1";
   const USER_SETTINGS_TABLE = "user_settings";
   const PROJECTS_TABLE = "projects";
   const TASKS_TABLE = "tasks";
@@ -91,6 +92,8 @@
 
   let projectConfigs = {};
   let projectConfigTexts = {};
+  let hiddenProjectIds = new Set();
+  let showHiddenProjects = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
 
@@ -504,6 +507,36 @@
     } catch (error) {
       console.warn("Failed to save local task state:", error);
     }
+  }
+
+  function loadHiddenProjects() {
+    try {
+      const raw = localStorage.getItem(HIDDEN_PROJECTS_STORAGE_KEY);
+      hiddenProjectIds = raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (error) {
+      console.warn("Failed to load hidden projects:", error);
+      hiddenProjectIds = new Set();
+    }
+  }
+
+  function saveHiddenProjects() {
+    try {
+      localStorage.setItem(HIDDEN_PROJECTS_STORAGE_KEY, JSON.stringify(Array.from(hiddenProjectIds)));
+    } catch (error) {
+      console.warn("Failed to save hidden projects:", error);
+    }
+  }
+
+  function hideProject(projectId) {
+    hiddenProjectIds.add(projectId);
+    saveHiddenProjects();
+    renderHome();
+  }
+
+  function unhideProject(projectId) {
+    hiddenProjectIds.delete(projectId);
+    saveHiddenProjects();
+    renderHome();
   }
 
   function touchProject(projectState, timestamp) {
@@ -1696,9 +1729,10 @@
           name: projectState && projectState.name ? projectState.name : projectId,
           hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
           inactive: !!(projectState && projectState.inactive),
+          hidden: hiddenProjectIds.has(projectId),
         };
       })
-      .filter((project) => project.name && !project.inactive)
+      .filter((project) => project.name && !project.inactive && (!project.hidden || showHiddenProjects))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -2183,6 +2217,13 @@
       homeAddTaskBtn.classList.toggle("hidden", projects.length === 0);
     }
 
+    const showHiddenBtn = $("#show-hidden-projects-btn");
+    if (showHiddenBtn) {
+      const hiddenCount = Array.from(hiddenProjectIds).filter((id) => appState.projects[id] && !appState.projects[id].inactive).length;
+      showHiddenBtn.classList.toggle("hidden", hiddenCount === 0 && !showHiddenProjects);
+      showHiddenBtn.textContent = showHiddenProjects ? "Hide hidden projects" : "Show hidden projects (" + hiddenCount + ")";
+    }
+
     renderHomeSummary(projects);
 
     if (!projects.length) {
@@ -2200,8 +2241,9 @@
       const stats = buildProjectStats(project.id);
       const projectState = ensureProjectState(project.id, project.name);
       const isDefault = appState.defaultProjectId === project.id;
+      const isHidden = project.hidden;
       const card = document.createElement("div");
-      card.className = "project-card" + (isDefault ? " project-card-default" : "");
+      card.className = "project-card" + (isDefault ? " project-card-default" : "") + (isHidden ? " project-card-hidden" : "");
       card.addEventListener("click", () => {
         openProject(project.id);
       });
@@ -2243,16 +2285,40 @@
       });
       topRowActions.appendChild(deleteButton);
 
-      const inactiveButton = document.createElement("button");
-      inactiveButton.type = "button";
-      inactiveButton.className = "project-card-inactive";
-      inactiveButton.textContent = "Make inactive";
-      inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
-      inactiveButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        makeProjectInactive(project.id);
-      });
-      topRowActions.appendChild(inactiveButton);
+      if (isHidden) {
+        const unhideButton = document.createElement("button");
+        unhideButton.type = "button";
+        unhideButton.className = "project-card-unhide";
+        unhideButton.textContent = "Unhide";
+        unhideButton.title = "Show this project on the home screen on this device.";
+        unhideButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          unhideProject(project.id);
+        });
+        topRowActions.appendChild(unhideButton);
+      } else {
+        const hideButton = document.createElement("button");
+        hideButton.type = "button";
+        hideButton.className = "project-card-hide";
+        hideButton.textContent = "Hide";
+        hideButton.title = "Hide this project on this device only. Use 'Show hidden projects' to reveal it again.";
+        hideButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          hideProject(project.id);
+        });
+        topRowActions.appendChild(hideButton);
+
+        const inactiveButton = document.createElement("button");
+        inactiveButton.type = "button";
+        inactiveButton.className = "project-card-inactive";
+        inactiveButton.textContent = "Make inactive";
+        inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
+        inactiveButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          makeProjectInactive(project.id);
+        });
+        topRowActions.appendChild(inactiveButton);
+      }
 
       topRow.appendChild(topRowActions);
 
@@ -2303,6 +2369,10 @@
     if (appState.defaultProjectId === projectId) {
       appState.defaultProjectId = null;
       appState.defaultProjectUpdatedAt = deletionTime;
+    }
+    if (hiddenProjectIds.has(projectId)) {
+      hiddenProjectIds.delete(projectId);
+      saveHiddenProjects();
     }
     appState.updatedAt = deletionTime;
     schedulePersist("Saving changes...");
@@ -4195,6 +4265,10 @@
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
+    $("#show-hidden-projects-btn").addEventListener("click", () => {
+      showHiddenProjects = !showHiddenProjects;
+      renderHome();
+    });
     $("#open-home-add-task-btn").addEventListener("click", () => {
       openAddTaskModal(null);
     });
@@ -4345,6 +4419,7 @@
     appEntered = true;
     loadLocalState();
     loadLocalProjectConfigs();
+    loadHiddenProjects();
     rebuildProjectConfigs();
 
     if (currentUser) {
