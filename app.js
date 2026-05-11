@@ -4432,7 +4432,7 @@
     showUserBar();
 
     const defaultId = appState.defaultProjectId;
-    if (defaultId && getProjectMeta(defaultId)) {
+    if (defaultId && getProjectMeta(defaultId) && !hiddenProjectIds.has(defaultId)) {
       currentProjectId = defaultId;
       renderHome();
       openDay(todayKey());
