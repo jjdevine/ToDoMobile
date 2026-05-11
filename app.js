@@ -2655,6 +2655,20 @@
     });
 
     controls.appendChild(toggle);
+
+    if (selectedTaskView === "overdue" && currentProjectId) {
+      const overdueCount = getTaskBuckets(currentProjectId, selectedDate).overdue
+        .filter((task) => !getPendingTaskCompletion(currentProjectId, task.id))
+        .length;
+      if (overdueCount > 0) {
+        const completeAllButton = document.createElement("button");
+        completeAllButton.type = "button";
+        completeAllButton.className = "btn-danger";
+        completeAllButton.textContent = "Complete all overdue";
+        completeAllButton.addEventListener("click", completeAllOverdueTasks);
+        controls.appendChild(completeAllButton);
+      }
+    }
   }
 
   function buildTaskMeta(task, archived) {
@@ -3631,6 +3645,45 @@
     renderCurrentScreen();
   }
 
+  function archiveTask(projectState, taskId, timestamp) {
+    const task = projectState.tasks[taskId];
+    if (!task) return false;
+    delete projectState.tasks[taskId];
+    projectState.archived[taskId] = {
+      ...task,
+      completedAt: timestamp,
+      updatedAt: timestamp,
+    };
+    return true;
+  }
+
+  function completeAllOverdueTasks() {
+    if (!currentProjectId) return;
+    const projectId = currentProjectId;
+    const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
+      .map((task) => task.id)
+      .filter((taskId) => !getPendingTaskCompletion(projectId, taskId));
+    const totalOverdue = overdueTaskIds.length;
+    if (!totalOverdue) return;
+
+    if (!confirm(`Are you sure you definitely want to complete all ${totalOverdue} overdue task${totalOverdue === 1 ? "" : "s"} for this project?`)) return;
+
+    const projectState = ensureProjectState(projectId, "");
+    const timestamp = nowIso();
+    let completedCount = 0;
+    overdueTaskIds.forEach((taskId) => {
+      clearPendingTaskCompletion(projectId, taskId);
+      if (archiveTask(projectState, taskId, timestamp)) {
+        completedCount++;
+      }
+    });
+
+    if (!completedCount) return;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
+  }
+
   function cancelTaskCompletion(taskId, projectId) {
     const resolvedProjectId = projectId || currentProjectId;
     if (!resolvedProjectId) return;
@@ -3646,19 +3699,11 @@
       renderCurrentScreen();
       return;
     }
-    const task = projectState.tasks[taskId];
-    if (!task) {
+    const timestamp = nowIso();
+    if (!archiveTask(projectState, taskId, timestamp)) {
       renderCurrentScreen();
       return;
     }
-
-    const timestamp = nowIso();
-    delete projectState.tasks[taskId];
-    projectState.archived[taskId] = {
-      ...task,
-      completedAt: timestamp,
-      updatedAt: timestamp,
-    };
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderCurrentScreen();
