@@ -192,6 +192,8 @@ Changes are persisted 2 seconds after they are made.
 
 The app stores state locally and, when the user is signed in, also syncs state to Supabase.
 
+Project and task deletions are synchronized using tombstones so that a newer delete cannot be unintentionally recreated by a stale device during merge.
+
 When cloud sync is enabled, the app supports:
 
 - Sign up

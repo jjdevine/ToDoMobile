@@ -10,6 +10,7 @@
   const ARCHIVED_TASKS_TABLE = "archived_tasks";
   const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
   const TASK_TOMBSTONES_TABLE = "task_tombstones";
+  const PROJECT_TOMBSTONES_TABLE = "project_tombstones";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const TOAST_DISPLAY_MS = 4000;
@@ -108,6 +109,7 @@
       version: 1,
       updatedAt: timestamp,
       projects: {},
+      deletedProjects: {},
       defaultProjectId: null,
       defaultProjectUpdatedAt: timestamp,
     };
@@ -326,6 +328,7 @@
     normalized.version = Number(rawState.version) || 1;
     normalized.updatedAt = typeof rawState.updatedAt === "string" ? rawState.updatedAt : nowIso();
     normalized.projects = {};
+    normalized.deletedProjects = normalizeTimestampMap(rawState.deletedProjects);
     normalized.defaultProjectId = typeof rawState.defaultProjectId === "string" ? rawState.defaultProjectId : null;
     normalized.defaultProjectUpdatedAt =
       typeof rawState.defaultProjectUpdatedAt === "string"
@@ -470,14 +473,23 @@
     const local = normalizeState(localState);
     const remote = normalizeState(remoteState);
     const merged = createEmptyState();
-    const projectIds = new Set(Object.keys(local.projects).concat(Object.keys(remote.projects)));
+    merged.deletedProjects = mergeTimestampMaps(local.deletedProjects, remote.deletedProjects);
+    const projectIds = new Set(
+      Object.keys(local.projects)
+        .concat(Object.keys(remote.projects))
+        .concat(Object.keys(merged.deletedProjects))
+    );
     const localDefaultUpdatedAt = local.defaultProjectUpdatedAt || local.updatedAt;
     const remoteDefaultUpdatedAt = remote.defaultProjectUpdatedAt || remote.updatedAt;
 
     projectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
       const remoteProject = remote.projects[projectId];
-      merged.projects[projectId] = mergeProjectStates(projectId, localProject, remoteProject);
+      if (!localProject && !remoteProject) return;
+      const mergedProject = mergeProjectStates(projectId, localProject, remoteProject);
+      const deletedAt = merged.deletedProjects[projectId];
+      if (deletedAt && compareIso(deletedAt, mergedProject.updatedAt) >= 0) return;
+      merged.projects[projectId] = mergedProject;
     });
 
     merged.updatedAt = laterIso(local.updatedAt, remote.updatedAt);
@@ -588,6 +600,8 @@
         tasks: [],
         archivedTasks: [],
         generatedOccurrences: [],
+        tombstones: [],
+        projectTombstones: [],
       };
     }
 
@@ -603,6 +617,7 @@
       archivedTasks: [],
       generatedOccurrences: [],
       tombstones: [],
+      projectTombstones: [],
     };
 
     Object.keys(normalizedState.projects).forEach((projectId) => {
@@ -686,6 +701,14 @@
       });
     });
 
+    Object.keys(normalizedState.deletedProjects || {}).forEach((projectId) => {
+      rows.projectTombstones.push({
+        user_id: userId,
+        project_id: projectId,
+        deleted_at: normalizedState.deletedProjects[projectId],
+      });
+    });
+
     return rows;
   }
 
@@ -699,6 +722,7 @@
     const payloadGeneratedOccurrences = Array.isArray(payload.generatedOccurrences) ? payload.generatedOccurrences : [];
     const payloadDescriptions = Array.isArray(payload.descriptions) ? payload.descriptions : [];
     const payloadTombstones = Array.isArray(payload.tombstones) ? payload.tombstones : [];
+    const payloadProjectTombstones = Array.isArray(payload.projectTombstones) ? payload.projectTombstones : [];
 
     if (payload.userSettings) {
       nextState.defaultProjectId =
@@ -831,6 +855,20 @@
       }
     });
 
+    payloadProjectTombstones.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || !row.project_id) return;
+      const deletedAt = typeof row.deleted_at === "string" ? row.deleted_at : nowIso();
+      nextState.deletedProjects[row.project_id] = deletedAt;
+    });
+
+    Object.keys(nextState.deletedProjects).forEach((projectId) => {
+      const projectState = projectsById[projectId];
+      if (!projectState) return;
+      if (compareIso(nextState.deletedProjects[projectId], projectState.updatedAt) >= 0) {
+        delete projectsById[projectId];
+      }
+    });
+
     nextState.projects = projectsById;
     return normalizeState(nextState);
   }
@@ -846,6 +884,7 @@
       archivedTasksRes,
       generatedOccurrencesRes,
       tombstonesRes,
+      projectTombstonesRes,
     ] = await Promise.all([
       supabase
         .schema("todo")
@@ -858,6 +897,7 @@
       supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
       supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("project_id, task_id, is_archived, deleted_at").eq("user_id", userId),
+      supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("project_id, deleted_at").eq("user_id", userId),
     ]);
 
     const firstError = [
@@ -867,6 +907,7 @@
       archivedTasksRes.error,
       generatedOccurrencesRes.error,
       tombstonesRes.error,
+      projectTombstonesRes.error,
     ].find(Boolean);
 
     if (firstError) {
@@ -881,6 +922,7 @@
       generatedOccurrences: generatedOccurrencesRes.data,
       descriptions: [],
       tombstones: tombstonesRes.data || [],
+      projectTombstones: projectTombstonesRes.data || [],
     });
   }
 
@@ -990,6 +1032,11 @@
           supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).upsert(rows.tombstones, { onConflict: "user_id,project_id,task_id,is_archived" })
         );
       }
+      if (rows.projectTombstones.length) {
+        upsertOperations.push(
+          supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).upsert(rows.projectTombstones, { onConflict: "user_id,project_id" })
+        );
+      }
 
       const upsertResults = await Promise.all(upsertOperations);
       const upsertError = upsertResults.map((result) => result.error).find(Boolean);
@@ -1065,12 +1112,41 @@
     const localNewer = [];  // changes remote will receive from local
 
     const allProjectIds = new Set(
-      Object.keys(local.projects).concat(Object.keys(remote.projects))
+      Object.keys(local.projects)
+        .concat(Object.keys(remote.projects))
+        .concat(Object.keys(local.deletedProjects))
+        .concat(Object.keys(remote.deletedProjects))
     );
 
     allProjectIds.forEach((projectId) => {
       const localProject = local.projects[projectId];
       const remoteProject = remote.projects[projectId];
+      const localDeletedAt = local.deletedProjects[projectId];
+      const remoteDeletedAt = remote.deletedProjects[projectId];
+      const localDeleted = !!localDeletedAt && (!localProject || compareIso(localDeletedAt, localProject.updatedAt) >= 0);
+      const remoteDeleted = !!remoteDeletedAt && (!remoteProject || compareIso(remoteDeletedAt, remoteProject.updatedAt) >= 0);
+
+      if (localDeleted && remoteDeleted) return;
+
+      if (localDeleted && !remoteDeleted) {
+        localNewer.push({
+          kind: "project",
+          label: (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId,
+          detail: "Project deleted locally",
+        });
+        return;
+      }
+
+      if (remoteDeleted && !localDeleted) {
+        remoteNewer.push({
+          kind: "project",
+          label: (remoteProject && remoteProject.name) || (localProject && localProject.name) || projectId,
+          detail: "Project deleted remotely",
+          projectId,
+          discardLocalOnly: !!localProject,
+        });
+        return;
+      }
 
       if (!localProject) {
         const taskCount = Object.keys(remoteProject.tasks || {}).length;
@@ -1379,6 +1455,7 @@
 
     if (itemKind === "project") {
       if (!appState.projects[projectId]) return;
+      appState.deletedProjects[projectId] = timestamp;
       delete appState.projects[projectId];
       delete projectConfigTexts[projectId];
       delete projectConfigs[projectId];
@@ -1390,6 +1467,10 @@
       if (appState.defaultProjectId === projectId) {
         appState.defaultProjectId = null;
         appState.defaultProjectUpdatedAt = timestamp;
+      }
+      if (hiddenProjectIds.has(projectId)) {
+        hiddenProjectIds.delete(projectId);
+        saveHiddenProjects();
       }
       appState.updatedAt = timestamp;
     } else if (itemKind === "task" && taskId) {
@@ -2381,6 +2462,7 @@
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
     const deletionTime = nowIso();
+    appState.deletedProjects[projectId] = deletionTime;
     delete appState.projects[projectId];
     delete projectConfigTexts[projectId];
     delete projectConfigs[projectId];
