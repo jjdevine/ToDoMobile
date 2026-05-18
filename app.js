@@ -98,6 +98,7 @@
   let showProjectActions = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
+  let forcedOfflineStartup = false;
 
   function nowIso() {
     return new Date().toISOString();
@@ -4384,6 +4385,16 @@
     });
     $("#download-all-archives-btn").addEventListener("click", downloadAllArchivedTasks);
     $("#delete-all-archives-btn").addEventListener("click", deleteAllArchivedTasks);
+    const forceOfflineBtn = $("#force-offline-mode-btn");
+    if (forceOfflineBtn) {
+      forceOfflineBtn.addEventListener("click", async () => {
+        if (appEntered || forcedOfflineStartup) return;
+        forcedOfflineStartup = true;
+        forceOfflineBtn.disabled = true;
+        forceOfflineBtn.textContent = "Opening offline mode...";
+        await enterApp();
+      });
+    }
     $("#back-from-inactive-btn").addEventListener("click", () => {
       renderHome();
       showScreen("home");
@@ -4561,16 +4572,8 @@
 
     if (supabase) {
       bindAuthEvents();
-
-      const sessionResponse = await supabase.auth.getSession();
-      if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
-        currentUser = sessionResponse.data.session.user;
-        await enterApp();
-      } else {
-        showScreen("auth");
-      }
-
       supabase.auth.onAuthStateChange((event, session) => {
+        if (forcedOfflineStartup) return;
         if (event === "SIGNED_IN" && session && session.user) {
           currentUser = session.user;
           enterApp();
@@ -4582,6 +4585,17 @@
           showScreen("auth");
         }
       });
+
+      const sessionResponse = await supabase.auth.getSession();
+      if (forcedOfflineStartup || appEntered) {
+        return;
+      }
+      if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
+        currentUser = sessionResponse.data.session.user;
+        await enterApp();
+      } else {
+        showScreen("auth");
+      }
       return;
     }
 
