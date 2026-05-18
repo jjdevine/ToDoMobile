@@ -98,6 +98,7 @@
   let showProjectActions = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
+  let forcedOfflineStartup = false;
 
   function nowIso() {
     return new Date().toISOString();
@@ -4384,6 +4385,17 @@
     });
     $("#download-all-archives-btn").addEventListener("click", downloadAllArchivedTasks);
     $("#delete-all-archives-btn").addEventListener("click", deleteAllArchivedTasks);
+    const forceOfflineBtn = $("#force-offline-mode-btn");
+    if (forceOfflineBtn) {
+      forceOfflineBtn.addEventListener("click", async () => {
+        if (appEntered) return;
+        forcedOfflineStartup = true;
+        currentUser = null;
+        forceOfflineBtn.disabled = true;
+        forceOfflineBtn.textContent = "Opening offline mode...";
+        await enterApp();
+      });
+    }
     $("#back-from-inactive-btn").addEventListener("click", () => {
       renderHome();
       showScreen("home");
@@ -4563,6 +4575,9 @@
       bindAuthEvents();
 
       const sessionResponse = await supabase.auth.getSession();
+      if (forcedOfflineStartup) {
+        return;
+      }
       if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
         currentUser = sessionResponse.data.session.user;
         await enterApp();
