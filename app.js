@@ -4574,6 +4574,7 @@
     if (supabase) {
       bindAuthEvents();
       supabase.auth.onAuthStateChange((event, session) => {
+        if (forcedOfflineStartup) return;
         if (event === "SIGNED_IN" && session && session.user) {
           currentUser = session.user;
           enterApp();
