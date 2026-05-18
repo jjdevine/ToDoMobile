@@ -4388,7 +4388,7 @@
     const forceOfflineBtn = $("#force-offline-mode-btn");
     if (forceOfflineBtn) {
       forceOfflineBtn.addEventListener("click", async () => {
-        if (appEntered) return;
+        if (appEntered || forcedOfflineStartup) return;
         forcedOfflineStartup = true;
         currentUser = null;
         forceOfflineBtn.disabled = true;
@@ -4573,18 +4573,6 @@
 
     if (supabase) {
       bindAuthEvents();
-
-      const sessionResponse = await supabase.auth.getSession();
-      if (forcedOfflineStartup) {
-        return;
-      }
-      if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
-        currentUser = sessionResponse.data.session.user;
-        await enterApp();
-      } else {
-        showScreen("auth");
-      }
-
       supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_IN" && session && session.user) {
           currentUser = session.user;
@@ -4597,6 +4585,17 @@
           showScreen("auth");
         }
       });
+
+      const sessionResponse = await supabase.auth.getSession();
+      if (forcedOfflineStartup || appEntered) {
+        return;
+      }
+      if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {
+        currentUser = sessionResponse.data.session.user;
+        await enterApp();
+      } else {
+        showScreen("auth");
+      }
       return;
     }
 
