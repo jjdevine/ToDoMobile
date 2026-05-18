@@ -4390,7 +4390,6 @@
       forceOfflineBtn.addEventListener("click", async () => {
         if (appEntered || forcedOfflineStartup) return;
         forcedOfflineStartup = true;
-        currentUser = null;
         forceOfflineBtn.disabled = true;
         forceOfflineBtn.textContent = "Opening offline mode...";
         await enterApp();
