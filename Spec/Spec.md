@@ -158,7 +158,7 @@ Active tasks support the following actions:
 
 Completing a task prompts for confirmation, removes it from the active list, and moves it into the archive.
 
-Deferring a task prompts the user to choose a new date within the remaining visible day range, from tomorrow through the end of the current 7-day window.
+Deferring a task prompts the user to choose a new date from the current day through one week ahead, including the same weekday in the following week.
 
 Editing a task allows the user to update its name, description, and due date, including clearing the due date.
 

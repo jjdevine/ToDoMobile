@@ -1985,7 +1985,7 @@
 
   function getDeferDates(excludeDateKey) {
     const start = todayKey();
-    const dates = enumerateDateKeys(start, addDays(start, 6));
+    const dates = enumerateDateKeys(start, addDays(start, 7));
     if (!excludeDateKey) return dates;
     return dates.filter((d) => d !== excludeDateKey);
   }
