@@ -2947,6 +2947,14 @@
         completeTask(task.id);
       });
 
+      const deferButton = document.createElement("button");
+      deferButton.type = "button";
+      deferButton.className = "task-btn defer";
+      deferButton.textContent = task.dueDate ? "Defer" : "Schedule";
+      deferButton.addEventListener("click", () => {
+        openDeferModal(task.id);
+      });
+
       const pinButton = document.createElement("button");
       pinButton.type = "button";
       pinButton.className = "task-btn pin";
@@ -2975,6 +2983,7 @@
       });
 
       actions.appendChild(completeButton);
+      actions.appendChild(deferButton);
       actions.appendChild(pinButton);
       actions.appendChild(endOfDayButton);
       actions.appendChild(expandButton);
