@@ -80,6 +80,9 @@
   let appEntered = false;
   let eventsBound = false;
   let syncInFlight = false;
+  let lastPullAt = 0;
+  let lastPulledRemoteStateUpdatedAt = null;
+  let requiresFreshPullBeforePush = true;
   let saveTimer = null;
   let currentProjectId = null;
   let selectedDate = todayKey();
@@ -573,7 +576,7 @@
     saveStateLocal();
 
     if (currentUser) {
-      const pushed = await pushState();
+      const pushed = await pushStateGuarded({ forcePull: true });
       if (pushed) {
         setSyncStatus("Saved and synced.");
       } else {
@@ -589,6 +592,23 @@
     clearTimeout(saveTimer);
     saveTimer = null;
     saveStateLocal();
+  }
+
+  function markRemoteStateStale() {
+    requiresFreshPullBeforePush = true;
+  }
+
+  function resetSyncTracking() {
+    lastPullAt = 0;
+    lastPulledRemoteStateUpdatedAt = null;
+    requiresFreshPullBeforePush = true;
+  }
+
+  async function ensureFreshRemoteStateBeforePush(forcePull) {
+    if (!supabase || !currentUser) return false;
+    const shouldPull = !!forcePull || requiresFreshPullBeforePush || !lastPullAt;
+    if (!shouldPull) return true;
+    return pullState();
   }
 
   function buildNormalizedRowsFromState(state) {
@@ -927,6 +947,81 @@
     });
   }
 
+  async function fetchRemoteSyncMarker() {
+    if (!supabase || !currentUser) return null;
+    const userId = currentUser.id;
+
+    const [userSettingsRes, projectsRes, tasksRes, archivedTasksRes, tombstonesRes, projectTombstonesRes] = await Promise.all([
+      supabase.schema("todo").from(USER_SETTINGS_TABLE).select("updated_at").eq("user_id", userId).maybeSingle(),
+      supabase.schema("todo").from(PROJECTS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
+    ]);
+
+    const firstError = [
+      userSettingsRes.error,
+      projectsRes.error,
+      tasksRes.error,
+      archivedTasksRes.error,
+      tombstonesRes.error,
+      projectTombstonesRes.error,
+    ].find(Boolean);
+    if (firstError) throw firstError;
+
+    const candidates = [];
+    if (userSettingsRes.data && typeof userSettingsRes.data.updated_at === "string" && userSettingsRes.data.updated_at) {
+      candidates.push(userSettingsRes.data.updated_at);
+    }
+    const latestProject = Array.isArray(projectsRes.data) ? projectsRes.data[0] : null;
+    if (latestProject && typeof latestProject.updated_at === "string" && latestProject.updated_at) {
+      candidates.push(latestProject.updated_at);
+    }
+    const latestTask = Array.isArray(tasksRes.data) ? tasksRes.data[0] : null;
+    if (latestTask && typeof latestTask.updated_at === "string" && latestTask.updated_at) {
+      candidates.push(latestTask.updated_at);
+    }
+    const latestArchivedTask = Array.isArray(archivedTasksRes.data) ? archivedTasksRes.data[0] : null;
+    if (latestArchivedTask && typeof latestArchivedTask.updated_at === "string" && latestArchivedTask.updated_at) {
+      candidates.push(latestArchivedTask.updated_at);
+    }
+    const latestTaskTombstone = Array.isArray(tombstonesRes.data) ? tombstonesRes.data[0] : null;
+    if (latestTaskTombstone && typeof latestTaskTombstone.deleted_at === "string" && latestTaskTombstone.deleted_at) {
+      candidates.push(latestTaskTombstone.deleted_at);
+    }
+    const latestProjectTombstone = Array.isArray(projectTombstonesRes.data) ? projectTombstonesRes.data[0] : null;
+    if (latestProjectTombstone && typeof latestProjectTombstone.deleted_at === "string" && latestProjectTombstone.deleted_at) {
+      candidates.push(latestProjectTombstone.deleted_at);
+    }
+
+    return candidates.reduce((latest, value) => (latest && compareIso(latest, value) >= 0 ? latest : value), null);
+  }
+
+  async function pushStateGuarded(options) {
+    if (!supabase || !currentUser) return false;
+    const forcePull = !!(options && options.forcePull);
+
+    const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
+    if (!pulledBeforePush) return false;
+
+    if (lastPulledRemoteStateUpdatedAt) {
+      try {
+        const remoteMarker = await fetchRemoteSyncMarker();
+        if (remoteMarker && compareIso(remoteMarker, lastPulledRemoteStateUpdatedAt) > 0) {
+          const pulledAgain = await pullState();
+          if (!pulledAgain) return false;
+        }
+      } catch (error) {
+        console.error("Sync drift check error:", error.message || error);
+        showServerConnectionIssue(error, "sync-drift-check");
+        return false;
+      }
+    }
+
+    return pushState();
+  }
+
   async function pushState() {
     if (!supabase || !currentUser || syncInFlight) return false;
 
@@ -1065,6 +1160,10 @@
       if (!remoteState) return false;
       appState = mergeStates(appState, remoteState);
       saveStateLocal();
+      lastPullAt = Date.now();
+      lastPulledRemoteStateUpdatedAt =
+        typeof remoteState.updatedAt === "string" && remoteState.updatedAt ? remoteState.updatedAt : nowIso();
+      requiresFreshPullBeforePush = false;
       return true;
     } catch (error) {
       console.error("Sync pull error:", error.message || error);
@@ -1081,7 +1180,7 @@
     if (generation.changed) {
       saveStateLocal();
     }
-    const pushed = await pushState();
+    const pushed = await pushStateGuarded();
     renderCurrentScreen();
     if (pulled && pushed) {
       setSyncStatus("Sync complete.");
@@ -1398,7 +1497,7 @@
     appState = mergeStates(appState, pendingResyncRemoteState);
     generateTasksForAllProjects();
     saveStateLocal();
-    await pushState();
+    await pushStateGuarded({ forcePull: true });
     renderCurrentScreen();
     setSyncStatus("Resync complete.");
 
@@ -4527,6 +4626,7 @@
       }
       clearAllPendingTaskCompletions();
       currentUser = null;
+      resetSyncTracking();
       appEntered = false;
       currentProjectId = null;
       showScreen("auth");
@@ -4535,8 +4635,11 @@
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         flushLocalState();
+      } else {
+        markRemoteStateStale();
       }
     });
+    window.addEventListener("focus", markRemoteStateStale);
 
     window.addEventListener("beforeunload", flushLocalState);
   }
@@ -4585,10 +4688,12 @@
         if (forcedOfflineStartup) return;
         if (event === "SIGNED_IN" && session && session.user) {
           currentUser = session.user;
+          markRemoteStateStale();
           enterApp();
         } else if (event === "SIGNED_OUT") {
           clearAllPendingTaskCompletions();
           currentUser = null;
+          resetSyncTracking();
           appEntered = false;
           currentProjectId = null;
           showScreen("auth");
