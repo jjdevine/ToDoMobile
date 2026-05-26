@@ -2113,6 +2113,19 @@
     }).format(parseDateKey(dateKey));
   }
 
+  function ordinal(n) {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  function formatDayCardHeader(dateKey) {
+    const d = parseDateKey(dateKey);
+    const weekday = new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(d);
+    const month = new Intl.DateTimeFormat(undefined, { month: "long" }).format(d);
+    return weekday + " " + ordinal(d.getDate()) + " " + month;
+  }
+
   // Converts a YYYY-MM-DD dateKey to a DD/MM/YYYY display string.
   function formatDateDisplay(dateKey) {
     if (!dateKey) return "";
@@ -2784,11 +2797,7 @@
 
       const title = document.createElement("div");
       title.className = "day-title";
-      title.textContent = new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(parseDateKey(dateKey));
-
-      const date = document.createElement("div");
-      date.className = "day-date";
-      date.textContent = formatDatePill(dateKey);
+      title.textContent = formatDayCardHeader(dateKey);
 
       const metrics = document.createElement("div");
       metrics.className = "day-metrics";
@@ -2798,7 +2807,6 @@
         emptyCard.className = "day-card today empty-day-card";
         metrics.appendChild(document.createTextNode("No tasks due today"));
         emptyCard.appendChild(title);
-        emptyCard.appendChild(date);
         emptyCard.appendChild(metrics);
         dayStrip.appendChild(emptyCard);
         return;
@@ -2821,7 +2829,6 @@
       );
 
       card.appendChild(title);
-      card.appendChild(date);
       card.appendChild(metrics);
       dayStrip.appendChild(card);
     });
