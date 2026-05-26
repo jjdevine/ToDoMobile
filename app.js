@@ -2813,11 +2813,12 @@
         openDay(dateKey);
       });
 
-      metrics.appendChild(document.createTextNode("Required: " + stats.required));
-      metrics.appendChild(document.createElement("br"));
-      metrics.appendChild(document.createTextNode("Complete: " + stats.complete));
-      metrics.appendChild(document.createElement("br"));
-      metrics.appendChild(document.createTextNode("Incomplete: " + stats.incomplete));
+      const remainingSummary = "Remaining tasks: " + stats.incomplete + " of " + stats.required;
+      metrics.appendChild(
+        document.createTextNode(
+          stats.incomplete ? remainingSummary : remainingSummary + " (All tasks complete)"
+        )
+      );
 
       card.appendChild(title);
       card.appendChild(date);
