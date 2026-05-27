@@ -2945,6 +2945,13 @@
         .filter((task) => !getPendingTaskCompletion(currentProjectId, task.id))
         .length;
       if (overdueCount > 0) {
+        const deferAllButton = document.createElement("button");
+        deferAllButton.type = "button";
+        deferAllButton.className = "btn-secondary";
+        deferAllButton.textContent = "Defer all overdue to today";
+        deferAllButton.addEventListener("click", deferAllOverdueTasksToToday);
+        controls.appendChild(deferAllButton);
+
         const completeAllButton = document.createElement("button");
         completeAllButton.type = "button";
         completeAllButton.className = "btn-danger";
@@ -3972,6 +3979,35 @@
     });
 
     if (!completedCount) return;
+    touchProject(projectState, timestamp);
+    schedulePersist("Saving changes...");
+    renderCurrentScreen();
+  }
+
+  function deferAllOverdueTasksToToday() {
+    if (!currentProjectId) return;
+    const projectId = currentProjectId;
+    const today = todayKey();
+    const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
+      .map((task) => task.id)
+      .filter((taskId) => !getPendingTaskCompletion(projectId, taskId));
+    const totalOverdue = overdueTaskIds.length;
+    if (!totalOverdue) return;
+
+    if (!confirm(`Are you sure you want to defer all ${totalOverdue} overdue task${totalOverdue === 1 ? "" : "s"} to today for this project?`)) return;
+
+    const projectState = ensureProjectState(projectId, "");
+    const timestamp = nowIso();
+    let deferredCount = 0;
+    overdueTaskIds.forEach((taskId) => {
+      const task = projectState.tasks[taskId];
+      if (!task) return;
+      task.dueDate = today;
+      task.updatedAt = timestamp;
+      deferredCount++;
+    });
+
+    if (!deferredCount) return;
     touchProject(projectState, timestamp);
     schedulePersist("Saving changes...");
     renderCurrentScreen();
