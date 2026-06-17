@@ -4039,6 +4039,7 @@
     if (textarea) {
       const existing = textarea.value;
       textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
+      refreshRtdTaskNameDropdown();
     }
 
     resetTaskBuilder();
@@ -4051,6 +4052,7 @@
     if (textarea) {
       const existing = textarea.value;
       textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
+      refreshRtdTaskNameDropdown();
     }
     resetTaskBuilder();
     if (nameInput) nameInput.focus();
@@ -4063,7 +4065,10 @@
     reader.onload = (readEvent) => {
       const text = readEvent.target.result;
       const textarea = $("#config-modal-textarea");
-      if (textarea) textarea.value = text;
+      if (textarea) {
+        textarea.value = text;
+        refreshRtdTaskNameDropdown();
+      }
     };
     reader.readAsText(file);
     // Reset file input so the same file can be re-uploaded if needed.
