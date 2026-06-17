@@ -256,7 +256,7 @@
     <div class="modal-card modal-card-wide">
       <div class="config-modal-body">
         <h3>Project Configuration</h3>
-        <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, <code>task name-annual-MM-DD</code>, <code>task name-everyNweeks-YYYY-MM-DD</code>, or <code>task name-everyNmonths-YYYY-MM-DD</code> (where N is any positive integer). Lines starting with <code>#</code> are comments.</p>
+        <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-daily-daily</code>, <code>task name-workdays-workdays</code>, <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, <code>task name-annual-MM-DD</code>, <code>task name-everyNweeks-YYYY-MM-DD</code>, or <code>task name-everyNmonths-YYYY-MM-DD</code> (where N is any positive integer). Lines starting with <code>#</code> are comments.</p>
 
         <div class="task-builder">
           <h4 class="task-builder-heading">Add a new task rule</h4>
@@ -267,6 +267,12 @@
           <div class="task-builder-field">
             <span class="modal-label">Cadence</span>
             <div class="builder-radio-group">
+              <label class="builder-radio-label">
+                <input type="radio" name="builder-cadence" value="daily"> Daily
+              </label>
+              <label class="builder-radio-label">
+                <input type="radio" name="builder-cadence" value="workdays"> Workdays
+              </label>
               <label class="builder-radio-label">
                 <input type="radio" name="builder-cadence" value="weekly" checked> Weekly
               </label>
@@ -327,6 +333,12 @@
               <label class="builder-interval-label">months, starting</label>
               <input type="date" id="builder-every-months-start" class="builder-input">
             </div>
+            <div id="builder-daily-schedule" class="hidden builder-cadence-info">
+              Generates a task every day.
+            </div>
+            <div id="builder-workdays-schedule" class="hidden builder-cadence-info">
+              Generates a task Monday to Friday, excluding weekends.
+            </div>
           </div>
           <p id="builder-error" class="auth-error hidden"></p>
           <div class="task-builder-actions">
@@ -339,7 +351,7 @@
             <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
             <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
           </div>
-          <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
+          <textarea id="config-modal-textarea" placeholder="task name-daily-daily&#10;task name-workdays-workdays&#10;task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
           <p id="config-modal-error" class="auth-error hidden"></p>
         </form>
 
@@ -347,14 +359,16 @@
              name → description that is prefilled when the task is generated. -->
         <div class="recurring-task-descriptions-section">
           <h4 class="task-builder-heading">Default task descriptions</h4>
-          <p class="modal-text">Set a default description for a recurring task by entering its name exactly as it appears in the config above. When a matching recurring task is generated it will be created with this description prefilled. Descriptions may span multiple lines.</p>
+          <p class="modal-text">Set a default description for a recurring task by selecting its name from the dropdown below. The dropdown is populated from the task names in your config above. When a matching recurring task is generated it will be created with this description prefilled. Descriptions may span multiple lines.</p>
 
           <div id="recurring-task-descriptions-list"></div>
 
           <div class="recurring-desc-add-form">
             <div class="task-builder-field">
-              <label for="rtd-task-name-input" class="modal-label">Task name (exact match)</label>
-              <input type="text" id="rtd-task-name-input" class="builder-input" placeholder="e.g. shopping list" maxlength="200">
+              <label for="rtd-task-name-input" class="modal-label">Task name</label>
+              <select id="rtd-task-name-input" class="builder-input">
+                <option value="" disabled selected>— No tasks in config —</option>
+              </select>
             </div>
             <div class="task-builder-field">
               <label for="rtd-description-input" class="modal-label">Default description</label>

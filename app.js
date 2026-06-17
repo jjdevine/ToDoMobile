@@ -20,7 +20,7 @@
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
+  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
     "sunday",
     "monday",
@@ -1756,6 +1756,8 @@
         ? qualifierTokens.map(parseMonthlyQualifier).filter((value) => value !== null)
         : /^every\d+weeks$/i.test(frequency) || /^every\d+months$/i.test(frequency)
         ? qualifierTokens.map(parseIntervalQualifier).filter(Boolean)
+        : frequency === "daily" || frequency === "workdays"
+        ? [1]
         : qualifierTokens.map(parseAnnualQualifier).filter(Boolean);
 
       if (!name || !qualifiers.length) return;
@@ -1782,6 +1784,13 @@
   }
 
   function ruleMatchesDate(rule, dateKey) {
+    if (rule.frequency === "daily") {
+      return true;
+    }
+    if (rule.frequency === "workdays") {
+      const dow = parseDateKey(dateKey).getDay(); // 0=Sun, 6=Sat
+      return dow >= 1 && dow <= 5;
+    }
     if (rule.frequency === "weekly") {
       return rule.qualifiers.indexOf(getWeekdayToken(dateKey)) >= 0;
     }
@@ -3817,6 +3826,42 @@
 
   // --- Project configuration modal ---
 
+  /**
+   * Populates the task-name dropdown in the "Default task descriptions" form
+   * with the task names currently present in the config textarea.
+   */
+  function refreshRtdTaskNameDropdown() {
+    const select = $("#rtd-task-name-input");
+    if (!select) return;
+    const textarea = $("#config-modal-textarea");
+    const configText = textarea ? textarea.value : "";
+    const rules = parseProjectConfig(configText);
+    const taskNames = Array.from(new Set(rules.map((r) => r.name))).sort();
+
+    // Preserve the currently selected value if it still exists.
+    const previousValue = select.value;
+    select.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = taskNames.length ? "— Select a task —" : "— No tasks in config —";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.appendChild(placeholder);
+
+    taskNames.forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+
+    // Restore previous selection if still valid.
+    if (previousValue && taskNames.includes(previousValue)) {
+      select.value = previousValue;
+    }
+  }
+
   function openConfigModal(projectId) {
     configModalProjectId = projectId;
     const textarea = $("#config-modal-textarea");
@@ -3830,12 +3875,11 @@
     }
     resetTaskBuilder();
     // Clear any previously entered description form fields.
-    const rtdNameInput = $("#rtd-task-name-input");
-    if (rtdNameInput) rtdNameInput.value = "";
     const rtdDescInput = $("#rtd-description-input");
     if (rtdDescInput) rtdDescInput.value = "";
     const rtdErrorEl = $("#rtd-error");
     if (rtdErrorEl) { rtdErrorEl.textContent = ""; rtdErrorEl.classList.add("hidden"); }
+    refreshRtdTaskNameDropdown();
     renderRecurringTaskDescriptionsList(projectId);
     $("#config-modal").classList.remove("hidden");
     $("#config-modal").setAttribute("aria-hidden", "false");
@@ -3882,13 +3926,17 @@
     const annual = $("#builder-annual-schedule");
     const everyWeeks = $("#builder-every-weeks-schedule");
     const everyMonths = $("#builder-every-months-schedule");
-    if (!weekly || !monthly || !annual || !everyWeeks || !everyMonths) return;
+    const daily = $("#builder-daily-schedule");
+    const workdays = $("#builder-workdays-schedule");
+    if (!weekly || !monthly || !annual || !everyWeeks || !everyMonths || !daily || !workdays) return;
     const val = cadence ? cadence.value : "weekly";
     weekly.classList.toggle("hidden", val !== "weekly");
     monthly.classList.toggle("hidden", val !== "monthly");
     annual.classList.toggle("hidden", val !== "annual");
     everyWeeks.classList.toggle("hidden", val !== "everyweeks");
     everyMonths.classList.toggle("hidden", val !== "everymonths");
+    daily.classList.toggle("hidden", val !== "daily");
+    workdays.classList.toggle("hidden", val !== "workdays");
   }
 
   function handleBuilderAddTask() {
@@ -3964,6 +4012,10 @@
         return;
       }
       return appendIntervalRule(name, "every" + interval + "months", start, builderError, nameInput);
+    } else if (cadence === "daily") {
+      schedule = "daily";
+    } else if (cadence === "workdays") {
+      schedule = "workdays";
     } else {
       const monthlyInput = $("#builder-monthly-dates");
       const raw = monthlyInput ? monthlyInput.value.trim() : "";
@@ -4029,7 +4081,7 @@
 
     if (configText.trim() && !rules.length) {
       if (errorEl) {
-        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-everyNweeks-YYYY-MM-DD, or task name-everyNmonths-YYYY-MM-DD.";
+        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-daily-daily, task name-workdays-workdays, task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-everyNweeks-YYYY-MM-DD, or task name-everyNmonths-YYYY-MM-DD.";
         errorEl.classList.remove("hidden");
       }
       return;
@@ -4143,7 +4195,7 @@
     const description = descInput ? descInput.value : "";
 
     if (!taskName) {
-      if (errorEl) { errorEl.textContent = "Please enter a task name."; errorEl.classList.remove("hidden"); }
+      if (errorEl) { errorEl.textContent = "Please select a task name."; errorEl.classList.remove("hidden"); }
       if (nameInput) nameInput.focus();
       return;
     }
@@ -4857,6 +4909,7 @@
     $("#config-form").addEventListener("submit", saveProjectConfig);
     $("#clear-config-btn").addEventListener("click", clearProjectConfig);
     $("#config-file-input").addEventListener("change", handleConfigFileUpload);
+    $("#config-modal-textarea").addEventListener("input", refreshRtdTaskNameDropdown);
     document.querySelectorAll('input[name="builder-cadence"]').forEach((radio) => {
       radio.addEventListener("change", updateBuilderScheduleVisibility);
     });

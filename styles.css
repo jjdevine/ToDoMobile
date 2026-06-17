@@ -1402,6 +1402,11 @@ select {
   flex: 0 0 auto;
 }
 
+.builder-cadence-info {
+  font-size: 0.9rem;
+  color: var(--text-muted, #666);
+  padding: 0.3rem 0;
+}
 
 
 .config-upload-row {
