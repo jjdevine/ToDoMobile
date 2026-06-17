@@ -4,6 +4,7 @@
   const STORAGE_KEY = "task_planner_state_v1";
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
   const HIDDEN_PROJECTS_STORAGE_KEY = "task_planner_hidden_projects_v1";
+  const RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY = "task_planner_recurring_task_descriptions_v1";
   const USER_SETTINGS_TABLE = "user_settings";
   const PROJECTS_TABLE = "projects";
   const TASKS_TABLE = "tasks";
@@ -11,6 +12,7 @@
   const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
   const TASK_TOMBSTONES_TABLE = "task_tombstones";
   const PROJECT_TOMBSTONES_TABLE = "project_tombstones";
+  const RECURRING_TASK_DESCRIPTIONS_TABLE = "recurring_task_descriptions";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const COMPLETE_WARNING_LEAD_MS = 1000;
@@ -97,6 +99,11 @@
 
   let projectConfigs = {};
   let projectConfigTexts = {};
+  // Project-scoped default descriptions for recurring tasks.
+  // Shape: { [projectId]: { [taskName]: description } }
+  // Keyed by exact task name (case-sensitive). Loaded from localStorage on
+  // startup and fetched from Supabase when signed in.
+  let recurringTaskDescriptions = {};
   let hiddenProjectIds = new Set();
   let showHiddenProjects = false;
   let showProjectActions = false;
@@ -668,6 +675,7 @@
           generated_key: task.generatedKey || null,
           pinned: !!task.pinned,
           end_of_day: !!task.endOfDay,
+          body: task.description || "",
           created_at: task.createdAt || task.updatedAt || nowIso(),
           updated_at: task.updatedAt || nowIso(),
         });
@@ -1564,6 +1572,8 @@
       delete projectConfigs[projectId];
       saveLocalProjectConfigs();
       deleteProjectConfigFromDb(projectId);
+      delete recurringTaskDescriptions[projectId];
+      saveLocalRecurringTaskDescriptions();
       if (currentProjectId === projectId) {
         currentProjectId = null;
       }
@@ -1905,6 +1915,121 @@
     }
   }
 
+  // --- Recurring task descriptions local cache ---
+  // Maps projectId → { taskName → description }. Stored in localStorage for
+  // offline use and synced with the `todo.recurring_task_descriptions` table.
+
+  function loadLocalRecurringTaskDescriptions() {
+    try {
+      const raw = localStorage.getItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
+      recurringTaskDescriptions = raw ? JSON.parse(raw) : {};
+      if (typeof recurringTaskDescriptions !== "object" || Array.isArray(recurringTaskDescriptions)) {
+        recurringTaskDescriptions = {};
+      }
+    } catch (error) {
+      console.warn("Failed to load local recurring task descriptions:", error);
+      recurringTaskDescriptions = {};
+    }
+  }
+
+  function saveLocalRecurringTaskDescriptions() {
+    try {
+      localStorage.setItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY, JSON.stringify(recurringTaskDescriptions));
+    } catch (error) {
+      console.warn("Failed to save local recurring task descriptions:", error);
+    }
+  }
+
+  /**
+   * Returns the project-scoped default description for the given recurring task
+   * name, or an empty string if none is configured. Matching is exact (case-
+   * sensitive) against the task name as it appears in the recurring config.
+   */
+  function getRecurringTaskDefaultDescription(projectId, taskName) {
+    const projectDescs = recurringTaskDescriptions[projectId];
+    if (!projectDescs || typeof projectDescs !== "object") return "";
+    return typeof projectDescs[taskName] === "string" ? projectDescs[taskName] : "";
+  }
+
+  // --- Recurring task descriptions Supabase API ---
+
+  async function fetchAllRecurringTaskDescriptionsFromDb() {
+    if (!supabase || !currentUser) return;
+    try {
+      const { data, error } = await supabase
+        .schema("todo")
+        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
+        .select("project_id, task_name, description")
+        .eq("user_id", currentUser.id);
+      if (error) {
+        console.warn("Failed to fetch recurring task descriptions:", error.message);
+        showServerConnectionIssue(error, "recurring-task-desc-fetch");
+        return;
+      }
+      if (Array.isArray(data)) {
+        // Rebuild from remote data (remote is authoritative after a fetch).
+        recurringTaskDescriptions = {};
+        data.forEach((row) => {
+          if (row.project_id && typeof row.task_name === "string" && row.task_name) {
+            if (!recurringTaskDescriptions[row.project_id]) {
+              recurringTaskDescriptions[row.project_id] = {};
+            }
+            recurringTaskDescriptions[row.project_id][row.task_name] = typeof row.description === "string" ? row.description : "";
+          }
+        });
+        saveLocalRecurringTaskDescriptions();
+      }
+    } catch (error) {
+      console.warn("Failed to fetch recurring task descriptions:", error);
+      showServerConnectionIssue(error, "recurring-task-desc-fetch");
+    }
+  }
+
+  async function upsertRecurringTaskDescriptionToDb(projectId, taskName, description) {
+    if (!supabase || !currentUser || !projectId || !taskName) return;
+    try {
+      const { error } = await supabase
+        .schema("todo")
+        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
+        .upsert(
+          {
+            user_id: currentUser.id,
+            project_id: projectId,
+            task_name: taskName,
+            description: description || "",
+          },
+          { onConflict: "user_id, project_id, task_name" }
+        );
+      if (error) {
+        console.warn("Failed to save recurring task description:", error.message);
+        showServerConnectionIssue(error, "recurring-task-desc-upsert");
+      }
+    } catch (error) {
+      console.warn("Failed to save recurring task description:", error);
+      showServerConnectionIssue(error, "recurring-task-desc-upsert");
+    }
+  }
+
+  async function deleteRecurringTaskDescriptionFromDb(projectId, taskName) {
+    if (!supabase || !currentUser || !projectId || !taskName) return;
+    try {
+      const { error } = await supabase
+        .schema("todo")
+        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("task_name", taskName);
+      if (error) {
+        console.warn("Failed to delete recurring task description:", error.message);
+        showServerConnectionIssue(error, "recurring-task-desc-delete");
+      }
+    } catch (error) {
+      console.warn("Failed to delete recurring task description:", error);
+      showServerConnectionIssue(error, "recurring-task-desc-delete");
+    }
+  }
+
   function getAllProjects() {
     return Object.keys(appState.projects)
       .map((projectId) => {
@@ -1999,11 +2124,12 @@
 
         const timestamp = nowIso();
         const taskId = createStableId("task", generatedKey);
+        const defaultDescription = getRecurringTaskDefaultDescription(projectId, rule.name);
         projectState.tasks[taskId] = {
           id: taskId,
           projectId,
           name: rule.name,
-          description: "",
+          description: defaultDescription,
           dueDate: dateKey,
           source: "generated",
           generatedKey,
@@ -3691,6 +3817,14 @@
       errorEl.classList.add("hidden");
     }
     resetTaskBuilder();
+    // Clear any previously entered description form fields.
+    const rtdNameInput = $("#rtd-task-name-input");
+    if (rtdNameInput) rtdNameInput.value = "";
+    const rtdDescInput = $("#rtd-description-input");
+    if (rtdDescInput) rtdDescInput.value = "";
+    const rtdErrorEl = $("#rtd-error");
+    if (rtdErrorEl) { rtdErrorEl.textContent = ""; rtdErrorEl.classList.add("hidden"); }
+    renderRecurringTaskDescriptionsList(projectId);
     $("#config-modal").classList.remove("hidden");
     $("#config-modal").setAttribute("aria-hidden", "false");
     const builderName = $("#builder-task-name");
@@ -3927,6 +4061,104 @@
     setSyncStatus("Configuration cleared.");
     schedulePersist("Saving changes...");
     renderCurrentScreen();
+  }
+
+  // --- Recurring task description UI ---
+
+  /**
+   * Renders the list of task-name → description mappings for the given project
+   * inside the config modal. Called whenever the modal is opened or a mapping
+   * is added/removed.
+   */
+  function renderRecurringTaskDescriptionsList(projectId) {
+    const listEl = $("#recurring-task-descriptions-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    const projectDescs = recurringTaskDescriptions[projectId] || {};
+    const taskNames = Object.keys(projectDescs).sort();
+
+    if (!taskNames.length) {
+      const empty = document.createElement("p");
+      empty.className = "recurring-desc-empty";
+      empty.textContent = "No default descriptions configured for this project.";
+      listEl.appendChild(empty);
+      return;
+    }
+
+    taskNames.forEach((taskName) => {
+      const desc = projectDescs[taskName];
+      const item = document.createElement("div");
+      item.className = "recurring-desc-item";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "recurring-desc-task-name";
+      nameEl.textContent = taskName;
+      item.appendChild(nameEl);
+
+      const descEl = document.createElement("span");
+      descEl.className = "recurring-desc-preview";
+      const firstLine = (desc || "").split("\n")[0];
+      descEl.textContent = firstLine.length < 60 ? firstLine : firstLine.slice(0, 57) + "...";
+      item.appendChild(descEl);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn-danger recurring-desc-delete-btn";
+      deleteBtn.textContent = "Remove";
+      deleteBtn.setAttribute("data-project-id", projectId);
+      deleteBtn.setAttribute("data-task-name", taskName);
+      deleteBtn.addEventListener("click", () => handleDeleteRecurringTaskDescription(projectId, taskName));
+      item.appendChild(deleteBtn);
+
+      listEl.appendChild(item);
+    });
+  }
+
+  function handleAddRecurringTaskDescription() {
+    const projectId = configModalProjectId;
+    if (!projectId) return;
+
+    const nameInput = $("#rtd-task-name-input");
+    const descInput = $("#rtd-description-input");
+    const errorEl = $("#rtd-error");
+
+    if (errorEl) { errorEl.textContent = ""; errorEl.classList.add("hidden"); }
+
+    const taskName = nameInput ? nameInput.value.trim() : "";
+    const description = descInput ? descInput.value : "";
+
+    if (!taskName) {
+      if (errorEl) { errorEl.textContent = "Please enter a task name."; errorEl.classList.remove("hidden"); }
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    if (!recurringTaskDescriptions[projectId]) {
+      recurringTaskDescriptions[projectId] = {};
+    }
+    recurringTaskDescriptions[projectId][taskName] = description;
+    saveLocalRecurringTaskDescriptions();
+    upsertRecurringTaskDescriptionToDb(projectId, taskName, description);
+
+    if (nameInput) nameInput.value = "";
+    if (descInput) descInput.value = "";
+
+    renderRecurringTaskDescriptionsList(projectId);
+    if (nameInput) nameInput.focus();
+  }
+
+  function handleDeleteRecurringTaskDescription(projectId, taskName) {
+    if (!projectId || !taskName) return;
+    if (recurringTaskDescriptions[projectId]) {
+      delete recurringTaskDescriptions[projectId][taskName];
+      if (!Object.keys(recurringTaskDescriptions[projectId]).length) {
+        delete recurringTaskDescriptions[projectId];
+      }
+    }
+    saveLocalRecurringTaskDescriptions();
+    deleteRecurringTaskDescriptionFromDb(projectId, taskName);
+    renderRecurringTaskDescriptionsList(projectId);
   }
 
   function completeTask(taskId) {
@@ -4615,6 +4847,7 @@
       radio.addEventListener("change", updateBuilderScheduleVisibility);
     });
     $("#builder-add-btn").addEventListener("click", handleBuilderAddTask);
+    $("#rtd-add-btn").addEventListener("click", handleAddRecurringTaskDescription);
     $("#config-modal").addEventListener("click", (event) => {
       if (event.target === $("#config-modal")) {
         closeConfigModal();
@@ -4708,12 +4941,14 @@
     appEntered = true;
     loadLocalState();
     loadLocalProjectConfigs();
+    loadLocalRecurringTaskDescriptions();
     loadHiddenProjects();
     rebuildProjectConfigs();
 
     if (currentUser) {
       await pullState();
       await fetchAllProjectConfigsFromDb();
+      await fetchAllRecurringTaskDescriptionsFromDb();
     }
 
     const generation = generateTasksForAllProjects();
