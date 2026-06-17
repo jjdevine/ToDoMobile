@@ -18,6 +18,7 @@
   const COMPLETE_WARNING_LEAD_MS = 1000;
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
+  const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
   const WEEKDAY_TOKENS = [
@@ -4099,7 +4100,9 @@
       const descEl = document.createElement("span");
       descEl.className = "recurring-desc-preview";
       const firstLine = (desc || "").split("\n")[0];
-      descEl.textContent = firstLine.length < 60 ? firstLine : firstLine.slice(0, 57) + "...";
+      descEl.textContent = firstLine.length <= RECURRING_DESC_PREVIEW_MAX_LENGTH
+        ? firstLine
+        : firstLine.slice(0, RECURRING_DESC_PREVIEW_MAX_LENGTH - 3) + "...";
       item.appendChild(descEl);
 
       const deleteBtn = document.createElement("button");
