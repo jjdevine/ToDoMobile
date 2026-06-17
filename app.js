@@ -3132,7 +3132,7 @@
 
       const cancelButton = document.createElement("button");
       cancelButton.type = "button";
-      cancelButton.className = "task-btn cancel-completion" + (pendingCompletion.isWarning ? " warning" : "");
+      cancelButton.className = `task-btn cancel-completion${pendingCompletion.isWarning ? " warning" : ""}`;
       cancelButton.textContent = "Cancel Completion...";
       cancelButton.addEventListener("click", () => {
         cancelTaskCompletion(task.id, task.projectId);
