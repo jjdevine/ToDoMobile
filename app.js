@@ -3184,11 +3184,22 @@
     actions.className = "task-actions";
 
     if (condensedCard && !expandedInCondensed) {
+      const requiresDescriptionReview = !!task.description;
       const completeButton = document.createElement("button");
       completeButton.type = "button";
       completeButton.className = "task-btn complete";
-      completeButton.textContent = "Complete";
+      completeButton.textContent = requiresDescriptionReview ? "Complete..." : "Complete";
+      if (requiresDescriptionReview) {
+        completeButton.setAttribute("aria-label", "Review description before completing task");
+      }
       completeButton.addEventListener("click", () => {
+        if (requiresDescriptionReview) {
+          setTaskExpanded(task, true);
+          if (currentProjectId) {
+            renderTaskSections(currentProjectId);
+          }
+          return;
+        }
         completeTask(task.id);
       });
 
