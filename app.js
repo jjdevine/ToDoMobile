@@ -3879,7 +3879,7 @@
     if (rtdDescInput) rtdDescInput.value = "";
     const rtdErrorEl = $("#rtd-error");
     if (rtdErrorEl) { rtdErrorEl.textContent = ""; rtdErrorEl.classList.add("hidden"); }
-    refreshRtdTaskNameDropdown(projectId);
+    refreshRtdTaskNameDropdown();
     renderRecurringTaskDescriptionsList(projectId);
     $("#config-modal").classList.remove("hidden");
     $("#config-modal").setAttribute("aria-hidden", "false");
