@@ -1454,6 +1454,79 @@ select {
   margin-top: 0.9rem;
 }
 
+/* --- Recurring task default descriptions section (in config modal) --- */
+
+.recurring-task-descriptions-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+#recurring-task-descriptions-list {
+  margin-bottom: 1rem;
+}
+
+.recurring-desc-empty {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.recurring-desc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.4rem;
+}
+
+.recurring-desc-task-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text);
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recurring-desc-preview {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recurring-desc-delete-btn {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.recurring-desc-add-form {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+}
+
+.rtd-description-textarea {
+  resize: vertical;
+  min-height: 5rem;
+  font-family: inherit;
+}
+
+.task-builder-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .defer-date-buttons {
   display: flex;
   flex-direction: column;

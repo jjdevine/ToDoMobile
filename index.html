@@ -342,6 +342,30 @@
           <textarea id="config-modal-textarea" placeholder="task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
           <p id="config-modal-error" class="auth-error hidden"></p>
         </form>
+
+        <!-- Default task descriptions: project-scoped mapping of recurring task
+             name → description that is prefilled when the task is generated. -->
+        <div class="recurring-task-descriptions-section">
+          <h4 class="task-builder-heading">Default task descriptions</h4>
+          <p class="modal-text">Set a default description for a recurring task by entering its name exactly as it appears in the config above. When a matching recurring task is generated it will be created with this description prefilled. Descriptions may span multiple lines.</p>
+
+          <div id="recurring-task-descriptions-list"></div>
+
+          <div class="recurring-desc-add-form">
+            <div class="task-builder-field">
+              <label for="rtd-task-name-input" class="modal-label">Task name (exact match)</label>
+              <input type="text" id="rtd-task-name-input" class="builder-input" placeholder="e.g. shopping list" maxlength="200">
+            </div>
+            <div class="task-builder-field">
+              <label for="rtd-description-input" class="modal-label">Default description</label>
+              <textarea id="rtd-description-input" class="builder-input rtd-description-textarea" placeholder="Enter the default description for this task…" rows="4"></textarea>
+            </div>
+            <p id="rtd-error" class="auth-error hidden"></p>
+            <div class="task-builder-actions">
+              <button id="rtd-add-btn" type="button" class="btn-secondary">Save description</button>
+            </div>
+          </div>
+        </div>
       </div>
       <!-- Actions are outside the scroll area so they remain visible at all times.
            The submit button uses form="config-form" to stay associated with the form. -->
