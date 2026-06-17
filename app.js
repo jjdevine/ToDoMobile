@@ -3942,15 +3942,13 @@
     pendingTaskCompletions[pendingKey] = {
       projectId,
       taskId,
-      isWarning: warningDelayMs <= 0,
-      warningTimeoutId: warningDelayMs > 0
-        ? setTimeout(() => {
-            const pending = pendingTaskCompletions[pendingKey];
-            if (!pending) return;
-            pending.isWarning = true;
-            renderCurrentScreen();
-          }, warningDelayMs)
-        : null,
+      isWarning: false,
+      warningTimeoutId: setTimeout(() => {
+        const pending = pendingTaskCompletions[pendingKey];
+        if (!pending) return;
+        pending.isWarning = true;
+        renderCurrentScreen();
+      }, warningDelayMs),
       timeoutId: setTimeout(() => {
         finalizeTaskCompletion(projectId, taskId);
       }, COMPLETE_DELAY_MS),
