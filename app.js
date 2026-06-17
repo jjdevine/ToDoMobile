@@ -13,6 +13,7 @@
   const PROJECT_TOMBSTONES_TABLE = "project_tombstones";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
+  const COMPLETE_WARNING_LEAD_MS = 1000;
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
@@ -148,6 +149,7 @@
     const pending = pendingTaskCompletions[pendingKey];
     if (!pending) return null;
     clearTimeout(pending.timeoutId);
+    clearTimeout(pending.warningTimeoutId);
     delete pendingTaskCompletions[pendingKey];
     return pending;
   }
@@ -155,6 +157,7 @@
   function clearAllPendingTaskCompletions() {
     Object.keys(pendingTaskCompletions).forEach((pendingKey) => {
       clearTimeout(pendingTaskCompletions[pendingKey].timeoutId);
+      clearTimeout(pendingTaskCompletions[pendingKey].warningTimeoutId);
     });
     pendingTaskCompletions = {};
   }
@@ -3022,6 +3025,7 @@
     if (!options.archived && task.endOfDay) card.classList.add("end-of-day");
     const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
     if (pendingCompletion) card.classList.add("pending-completion");
+    if (pendingCompletion && pendingCompletion.isWarning) card.classList.add("pending-completion-warning");
     const condensedCard = condensedMode && !options.archived && !pendingCompletion;
     const expandedInCondensed = condensedCard ? isTaskExpanded(task) : false;
     if (condensedCard && !expandedInCondensed) card.classList.add("condensed");
@@ -3128,7 +3132,7 @@
 
       const cancelButton = document.createElement("button");
       cancelButton.type = "button";
-      cancelButton.className = "task-btn cancel-completion";
+      cancelButton.className = "task-btn cancel-completion" + (pendingCompletion.isWarning ? " warning" : "");
       cancelButton.textContent = "Cancel Completion...";
       cancelButton.addEventListener("click", () => {
         cancelTaskCompletion(task.id, task.projectId);
@@ -3934,9 +3938,19 @@
 
     const projectId = currentProjectId;
     const pendingKey = buildPendingTaskCompletionKey(projectId, taskId);
+    const warningDelayMs = COMPLETE_DELAY_MS - COMPLETE_WARNING_LEAD_MS;
     pendingTaskCompletions[pendingKey] = {
       projectId,
       taskId,
+      isWarning: warningDelayMs <= 0,
+      warningTimeoutId: warningDelayMs > 0
+        ? setTimeout(() => {
+            const pending = pendingTaskCompletions[pendingKey];
+            if (!pending) return;
+            pending.isWarning = true;
+            renderCurrentScreen();
+          }, warningDelayMs)
+        : null,
       timeoutId: setTimeout(() => {
         finalizeTaskCompletion(projectId, taskId);
       }, COMPLETE_DELAY_MS),
