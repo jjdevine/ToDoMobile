@@ -1774,9 +1774,9 @@
 
     Array.from(projectIds)
       .sort((a, b) => {
-        const localProject = localState.projects[a];
-        const remoteProject = normalizedRemoteState.projects[a];
-        const labelA = (localProject && localProject.name) || (remoteProject && remoteProject.name) || a;
+        const localProjectA = localState.projects[a];
+        const remoteProjectA = normalizedRemoteState.projects[a];
+        const labelA = (localProjectA && localProjectA.name) || (remoteProjectA && remoteProjectA.name) || a;
         const localProjectB = localState.projects[b];
         const remoteProjectB = normalizedRemoteState.projects[b];
         const labelB = (localProjectB && localProjectB.name) || (remoteProjectB && remoteProjectB.name) || b;
@@ -2401,8 +2401,7 @@
         hasConfig: !!(projectConfigs[project.id] && projectConfigs[project.id].length > 0),
         inactive: project.inactive,
         hidden: project.hidden,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      }));
   }
 
   function getInactiveProjects() {
