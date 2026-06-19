@@ -1704,6 +1704,16 @@ select {
   color: var(--green);
 }
 
+.validation-section-badge-error {
+  background: rgba(234, 96, 96, 0.18);
+  color: #ff9d9d;
+}
+
+.validation-section-badge-unavailable {
+  background: rgba(255, 193, 7, 0.18);
+  color: #f6d36b;
+}
+
 .resync-item-list {
   list-style: none;
   display: flex;
