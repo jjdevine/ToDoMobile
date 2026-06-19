@@ -1523,7 +1523,7 @@
       lines.push('<ul class="resync-item-list">');
       items.forEach((item) => {
         const meta = item.projectName
-          ? escapeHtml(item.detail) + " &mdash; " + escapeHtml(item.projectName)
+          ? escapeHtml(item.detail) + " — " + escapeHtml(item.projectName)
           : escapeHtml(item.detail);
         lines.push('<li class="resync-item">');
         lines.push('<div class="resync-item-main">');
@@ -2405,7 +2405,6 @@
         id: project.id,
         name: project.name,
         hasConfig: !!(projectConfigs[project.id] && projectConfigs[project.id].length > 0),
-        inactive: project.inactive,
         hidden: project.hidden,
       }));
   }
