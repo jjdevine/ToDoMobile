@@ -1771,7 +1771,12 @@
     const remoteVisibleProjects = getVisibleProjectsForState(remoteState);
     const localState = normalizeState(appState);
     const normalizedRemoteState = normalizeState(remoteState);
-    const projectIds = new Set(localVisibleProjects.map((project) => project.id).concat(remoteVisibleProjects.map((project) => project.id)));
+    const localVisibleById = new Map(localVisibleProjects.map((project) => [project.id, project]));
+    const remoteVisibleById = new Map(remoteVisibleProjects.map((project) => [project.id, project]));
+    const projectIds = new Set([
+      ...localVisibleProjects.map((project) => project.id),
+      ...remoteVisibleProjects.map((project) => project.id),
+    ]);
 
     Array.from(projectIds)
       .sort((a, b) => {
@@ -1784,8 +1789,8 @@
         return String(labelA).localeCompare(String(labelB));
       })
       .forEach((projectId) => {
-        const localProject = localVisibleProjects.find((project) => project.id === projectId);
-        const remoteProject = remoteVisibleProjects.find((project) => project.id === projectId);
+        const localProject = localVisibleById.get(projectId);
+        const remoteProject = remoteVisibleById.get(projectId);
 
         if (!localProject && remoteProject) {
           pushValidationIssue(issues, "missingLocal", remoteProject.name, "Visible project exists on the server only.");
