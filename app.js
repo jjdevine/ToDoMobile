@@ -1381,7 +1381,8 @@
   }
 
   function formatValidationValue(value) {
-    if (value === null || value === undefined || value === "") return "none";
+    if (value === null || value === undefined) return "none";
+    if (value === "") return "blank";
     if (typeof value === "boolean") return value ? "yes" : "no";
     return String(value);
   }
