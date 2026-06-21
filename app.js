@@ -5298,6 +5298,13 @@
       radio.addEventListener("change", updateBuilderScheduleVisibility);
     });
     $("#builder-add-btn").addEventListener("click", handleBuilderAddTask);
+    $("#rtd-task-name-input").addEventListener("change", () => {
+      const taskName = $("#rtd-task-name-input").value;
+      const descInput = $("#rtd-description-input");
+      if (!descInput) return;
+      const projectDescs = recurringTaskDescriptions[configModalProjectId] || {};
+      descInput.value = taskName && projectDescs[taskName] !== undefined ? projectDescs[taskName] : "";
+    });
     $("#rtd-add-btn").addEventListener("click", handleAddRecurringTaskDescription);
     $("#config-modal").addEventListener("click", (event) => {
       if (event.target === $("#config-modal")) {
