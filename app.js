@@ -1551,19 +1551,25 @@
     ];
 
     sections.forEach((section) => {
-      const items = issues.filter((issue) => issue.sectionKey === section.key);
-      if (!items.length) return;
+      const entries = [];
+      issues.forEach((issue, index) => {
+        if (issue.sectionKey === section.key) {
+          entries.push({ issue, index });
+        }
+      });
+      if (!entries.length) return;
 
       lines.push('<div class="resync-section">');
       lines.push(
         '<div class="resync-section-heading">' +
-          '<span class="resync-section-badge ' + section.badgeClass + '">' + items.length + "</span>" +
+          '<span class="resync-section-badge ' + section.badgeClass + '">' + entries.length + "</span>" +
           escapeHtml(section.title) +
         "</div>"
       );
       lines.push('<ul class="resync-item-list">');
-      items.forEach((item) => {
-        const issueIndex = issues.indexOf(item);
+      entries.forEach((entry) => {
+        const item = entry.issue;
+        const issueIndex = entry.index;
         const actionable = includeActions && canResolveValidationIssue(item) && issueIndex >= 0;
         const meta = item.projectName
           ? escapeHtml(item.detail) + " — " + escapeHtml(item.projectName)
@@ -1892,9 +1898,7 @@
       issueIndexes.forEach((index) => {
         const issue = pendingValidationIssues[index];
         const result = applyValidationIssueAction(issue, action);
-        if (result?.changed) {
-          changed = true;
-        }
+        changed = !!result?.changed || changed;
       });
       if (changed) {
         generateTasksForAllProjects();
