@@ -1754,6 +1754,17 @@ select {
   font-size: 0.78rem;
 }
 
+.resync-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.validation-modal-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .resync-in-sync {
   display: flex;
   align-items: center;
