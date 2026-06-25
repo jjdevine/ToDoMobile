@@ -1714,6 +1714,9 @@
   }
 
   function cloneStateValue(value) {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
     return JSON.parse(JSON.stringify(value));
   }
 
@@ -1889,7 +1892,7 @@
       issueIndexes.forEach((index) => {
         const issue = pendingValidationIssues[index];
         const result = applyValidationIssueAction(issue, action);
-        if (result && result.changed) {
+        if (result?.changed) {
           changed = true;
         }
       });
