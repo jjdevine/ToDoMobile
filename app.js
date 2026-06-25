@@ -1823,8 +1823,13 @@
       } else if (action === "update-server-from-local") {
         if (issue.sectionKey === "missingLocal") {
           if (!localProject) return false;
-          localProject.deletedTasks = localProject.deletedTasks || {};
-          localProject.deletedTasks[issue.taskId] = timestamp;
+          if (archived) {
+            localProject.deletedArchivedTasks = localProject.deletedArchivedTasks || {};
+            localProject.deletedArchivedTasks[issue.taskId] = timestamp;
+          } else {
+            localProject.deletedTasks = localProject.deletedTasks || {};
+            localProject.deletedTasks[issue.taskId] = timestamp;
+          }
           touchProject(localProject, timestamp);
           changed = true;
         } else if (localProject) {
@@ -1888,17 +1893,18 @@
           changed = true;
         }
       });
-      if (!changed) return;
-      generateTasksForAllProjects();
-      saveStateLocal();
-      renderCurrentScreen();
-      if (shouldPush) {
-        setSyncStatus("Syncing local validation choices to server…");
-        await pushStateGuarded({ forcePull: true });
-      } else {
-        setSyncStatus("Applied local validation changes.");
+      if (changed) {
+        generateTasksForAllProjects();
+        saveStateLocal();
+        renderCurrentScreen();
+        if (shouldPush) {
+          setSyncStatus("Syncing local validation choices to server…");
+          await pushStateGuarded({ forcePull: true });
+        } else {
+          setSyncStatus("Applied local validation changes.");
+        }
+        await rerunPendingValidation();
       }
-      await rerunPendingValidation();
     } finally {
       if (closeBtn) closeBtn.disabled = false;
       if (matchAllBtn) matchAllBtn.disabled = false;
