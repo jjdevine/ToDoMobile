@@ -1569,7 +1569,7 @@
       lines.push('<ul class="resync-item-list">');
       entries.forEach((entry) => {
         const item = entry.issue;
-        const issueIndex = entry.index;
+        const issueIndex = Number.isInteger(entry.index) && entry.index >= 0 ? entry.index : -1;
         const actionable = includeActions && canResolveValidationIssue(item) && issueIndex >= 0;
         const meta = item.projectName
           ? escapeHtml(item.detail) + " — " + escapeHtml(item.projectName)
@@ -1723,7 +1723,17 @@
     if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
-    return JSON.parse(JSON.stringify(value));
+    if (Array.isArray(value)) {
+      return value.map((item) => cloneStateValue(item));
+    }
+    if (isPlainObject(value)) {
+      const cloned = {};
+      Object.keys(value).forEach((key) => {
+        cloned[key] = cloneStateValue(value[key]);
+      });
+      return cloned;
+    }
+    return value;
   }
 
   function removeLocalProjectState(projectId, timestamp) {
@@ -1898,7 +1908,7 @@
       issueIndexes.forEach((index) => {
         const issue = pendingValidationIssues[index];
         const result = applyValidationIssueAction(issue, action);
-        changed = !!result?.changed || changed;
+        changed ||= !!result?.changed;
       });
       if (changed) {
         generateTasksForAllProjects();
@@ -1923,7 +1933,7 @@
     const button = event.target.closest(".resync-item-action-btn");
     if (!button || !button.hasAttribute("data-validation-action")) return;
     const action = button.getAttribute("data-validation-action");
-    const issueIndex = Number(button.getAttribute("data-validation-index"));
+    const issueIndex = parseInt(button.getAttribute("data-validation-index"), 10);
     if (!Number.isInteger(issueIndex) || issueIndex < 0) return;
     await handleValidationIssueAction(action, [issueIndex]);
   }
