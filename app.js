@@ -1415,25 +1415,37 @@
     return differences;
   }
 
-  function pushValidationIssue(issues, sectionKey, label, detail, projectName) {
-    issues.push({
+  function pushValidationIssue(issues, sectionKey, label, detail, projectName, metadata) {
+    const issue = {
       sectionKey,
       label,
       detail,
       projectName: projectName || "",
-    });
+    };
+    if (metadata && isPlainObject(metadata)) {
+      Object.keys(metadata).forEach((key) => {
+        issue[key] = metadata[key];
+      });
+    }
+    issues.push(issue);
   }
 
   function compareProjectActiveTasks(localProject, remoteProject, issues, projectId) {
     const projectName = (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId;
 
     if (!localProject && remoteProject) {
-      pushValidationIssue(issues, "missingLocal", projectName, "Project exists on the server only.");
+      pushValidationIssue(issues, "missingLocal", projectName, "Project exists on the server only.", "", {
+        kind: "project",
+        projectId,
+      });
       return;
     }
 
     if (localProject && !remoteProject) {
-      pushValidationIssue(issues, "missingRemote", projectName, "Project exists on this device only.");
+      pushValidationIssue(issues, "missingRemote", projectName, "Project exists on this device only.", "", {
+        kind: "project",
+        projectId,
+      });
       return;
     }
 
@@ -1444,7 +1456,12 @@
         issues,
         "mismatch",
         projectName,
-        'Project name differs (local "' + formatValidationValue(localProject.name) + '", server "' + formatValidationValue(remoteProject.name) + '").'
+        'Project name differs (local "' + formatValidationValue(localProject.name) + '", server "' + formatValidationValue(remoteProject.name) + '").',
+        "",
+        {
+          kind: "project",
+          projectId,
+        }
       );
     }
 
@@ -1465,22 +1482,46 @@
         const label = (localTask && localTask.name) || (remoteTask && remoteTask.name) || taskId;
 
         if (!localTask && remoteTask) {
-          pushValidationIssue(issues, "missingLocal", label, "Active task exists on the server only.", projectName);
+          pushValidationIssue(issues, "missingLocal", label, "Active task exists on the server only.", projectName, {
+            kind: "task",
+            projectId,
+            taskId,
+            archived: false,
+          });
           return;
         }
 
         if (localTask && !remoteTask) {
-          pushValidationIssue(issues, "missingRemote", label, "Active task exists on this device only.", projectName);
+          pushValidationIssue(issues, "missingRemote", label, "Active task exists on this device only.", projectName, {
+            kind: "task",
+            projectId,
+            taskId,
+            archived: false,
+          });
           return;
         }
 
         const differences = describeTaskValidationMismatch(localTask, remoteTask);
         if (!differences.length) return;
-        pushValidationIssue(issues, "mismatch", label, "Active task differs: " + differences.join("; ") + ".", projectName);
+        pushValidationIssue(issues, "mismatch", label, "Active task differs: " + differences.join("; ") + ".", projectName, {
+          kind: "task",
+          projectId,
+          taskId,
+          archived: false,
+        });
       });
   }
 
-  function buildValidationResultsHtml(issues, successMessage) {
+  function canResolveValidationIssue(issue) {
+    return !!(
+      issue &&
+      (issue.sectionKey === "missingLocal" || issue.sectionKey === "missingRemote" || issue.sectionKey === "mismatch") &&
+      issue.projectId &&
+      (issue.kind === "project" || issue.kind === "task")
+    );
+  }
+
+  function buildValidationResultsHtml(issues, successMessage, includeActions) {
     if (!issues.length) {
       return '<div class="resync-in-sync">&#10003; ' + escapeHtml(successMessage) + "</div>";
     }
@@ -1522,6 +1563,8 @@
       );
       lines.push('<ul class="resync-item-list">');
       items.forEach((item) => {
+        const issueIndex = issues.indexOf(item);
+        const actionable = includeActions && canResolveValidationIssue(item) && issueIndex >= 0;
         const meta = item.projectName
           ? escapeHtml(item.detail) + " — " + escapeHtml(item.projectName)
           : escapeHtml(item.detail);
@@ -1530,6 +1573,20 @@
         lines.push('<span class="resync-item-name">' + escapeHtml(item.label) + "</span>");
         lines.push('<span class="resync-item-meta">' + meta + "</span>");
         lines.push("</div>");
+        if (actionable) {
+          lines.push('<div class="resync-item-actions">');
+          lines.push(
+            '<button type="button" class="btn-secondary resync-item-action-btn" data-validation-action="match-local-to-server" data-validation-index="' +
+              issueIndex +
+              '">Match local to server</button>'
+          );
+          lines.push(
+            '<button type="button" class="btn-secondary resync-item-action-btn" data-validation-action="update-server-from-local" data-validation-index="' +
+              issueIndex +
+              '">Update server from local</button>'
+          );
+          lines.push("</div>");
+        }
         lines.push("</li>");
       });
       lines.push("</ul>");
@@ -1540,6 +1597,9 @@
   }
 
   let pendingResyncRemoteState = null;
+  let pendingValidationRemoteState = null;
+  let pendingValidationIssues = [];
+  let pendingValidationMode = null;
 
   function buildResyncDiffHtml(diff) {
     const { remoteNewer, localNewer } = diff;
@@ -1640,8 +1700,230 @@
   }
 
   function closeValidationModal() {
+    pendingValidationRemoteState = null;
+    pendingValidationIssues = [];
+    pendingValidationMode = null;
     $("#validation-modal").classList.add("hidden");
     $("#validation-modal").setAttribute("aria-hidden", "true");
+  }
+
+  function clearValidationActionState() {
+    pendingValidationRemoteState = null;
+    pendingValidationIssues = [];
+    pendingValidationMode = null;
+  }
+
+  function cloneStateValue(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function removeLocalProjectState(projectId, timestamp) {
+    if (!appState.projects[projectId]) return false;
+    appState.deletedProjects[projectId] = timestamp;
+    delete appState.projects[projectId];
+    delete projectConfigTexts[projectId];
+    delete projectConfigs[projectId];
+    saveLocalProjectConfigs();
+    deleteProjectConfigFromDb(projectId);
+    delete recurringTaskDescriptions[projectId];
+    saveLocalRecurringTaskDescriptions();
+    if (currentProjectId === projectId) {
+      currentProjectId = null;
+    }
+    if (appState.defaultProjectId === projectId) {
+      appState.defaultProjectId = null;
+      appState.defaultProjectUpdatedAt = timestamp;
+    }
+    if (hiddenProjectIds.has(projectId)) {
+      hiddenProjectIds.delete(projectId);
+      saveHiddenProjects();
+    }
+    appState.updatedAt = timestamp;
+    return true;
+  }
+
+  function removeLocalTaskState(projectId, taskId, archived, timestamp) {
+    const projectState = appState.projects[projectId];
+    if (!projectState) return false;
+    if (archived) {
+      if (!projectState.archived[taskId]) return false;
+      projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
+      projectState.deletedArchivedTasks[taskId] = timestamp;
+      delete projectState.archived[taskId];
+    } else {
+      if (!projectState.tasks[taskId]) return false;
+      projectState.deletedTasks = projectState.deletedTasks || {};
+      projectState.deletedTasks[taskId] = timestamp;
+      delete projectState.tasks[taskId];
+    }
+    touchProject(projectState, timestamp);
+    deleteTaskDescription(projectId, taskId);
+    return true;
+  }
+
+  function applyValidationIssueAction(issue, action) {
+    if (!canResolveValidationIssue(issue) || !pendingValidationRemoteState) return false;
+    const timestamp = nowIso();
+    const normalizedRemoteState = normalizeState(pendingValidationRemoteState);
+    const remoteProject = normalizedRemoteState.projects[issue.projectId];
+    const localProject = appState.projects[issue.projectId];
+    const archived = !!issue.archived;
+    let changed = false;
+    let requiresPush = action === "update-server-from-local";
+
+    if (issue.kind === "project") {
+      if (action === "match-local-to-server") {
+        if (issue.sectionKey === "missingRemote") {
+          changed = removeLocalProjectState(issue.projectId, timestamp);
+        } else if ((issue.sectionKey === "missingLocal" || issue.sectionKey === "mismatch") && remoteProject) {
+          appState.projects[issue.projectId] = cloneStateValue(remoteProject);
+          delete appState.deletedProjects[issue.projectId];
+          appState.updatedAt = timestamp;
+          changed = true;
+        }
+      } else if (action === "update-server-from-local") {
+        if (issue.sectionKey === "missingLocal") {
+          appState.deletedProjects[issue.projectId] = timestamp;
+          appState.updatedAt = timestamp;
+          changed = true;
+        } else if (localProject) {
+          delete appState.deletedProjects[issue.projectId];
+          touchProject(localProject, timestamp);
+          changed = true;
+        }
+      }
+    } else if (issue.kind === "task") {
+      const remoteTask = remoteProject
+        ? archived
+          ? (remoteProject.archived || {})[issue.taskId]
+          : (remoteProject.tasks || {})[issue.taskId]
+        : null;
+      if (action === "match-local-to-server") {
+        if (issue.sectionKey === "missingRemote") {
+          changed = removeLocalTaskState(issue.projectId, issue.taskId, archived, timestamp);
+        } else if ((issue.sectionKey === "missingLocal" || issue.sectionKey === "mismatch") && remoteTask) {
+          if (!appState.projects[issue.projectId]) return false;
+          const projectState = appState.projects[issue.projectId];
+          if (archived) {
+            projectState.archived = projectState.archived || {};
+            projectState.archived[issue.taskId] = cloneStateValue(remoteTask);
+            if (projectState.deletedArchivedTasks) {
+              delete projectState.deletedArchivedTasks[issue.taskId];
+            }
+          } else {
+            projectState.tasks = projectState.tasks || {};
+            projectState.tasks[issue.taskId] = cloneStateValue(remoteTask);
+            if (projectState.deletedTasks) {
+              delete projectState.deletedTasks[issue.taskId];
+            }
+          }
+          touchProject(projectState, timestamp);
+          changed = true;
+        }
+      } else if (action === "update-server-from-local") {
+        if (issue.sectionKey === "missingLocal") {
+          if (!localProject) return false;
+          localProject.deletedTasks = localProject.deletedTasks || {};
+          localProject.deletedTasks[issue.taskId] = timestamp;
+          touchProject(localProject, timestamp);
+          changed = true;
+        } else if (localProject) {
+          const localTask = archived
+            ? (localProject.archived || {})[issue.taskId]
+            : (localProject.tasks || {})[issue.taskId];
+          if (!localTask) return false;
+          localTask.updatedAt = timestamp;
+          touchProject(localProject, timestamp);
+          changed = true;
+        }
+      }
+    }
+
+    return changed ? { changed: true, requiresPush } : false;
+  }
+
+  async function rerunPendingValidation() {
+    if (pendingValidationMode === "current") {
+      await validateCurrentProjectState();
+      return;
+    }
+    if (pendingValidationMode === "visible") {
+      await validateVisibleProjectsState();
+      return;
+    }
+    clearValidationActionState();
+  }
+
+  function refreshValidationActionButtons() {
+    const matchAllBtn = $("#validation-match-local-all-btn");
+    const updateAllBtn = $("#validation-update-server-all-btn");
+    if (!matchAllBtn || !updateAllBtn) return;
+    const actionableCount = pendingValidationIssues.filter(canResolveValidationIssue).length;
+    if (!pendingValidationRemoteState || actionableCount === 0) {
+      matchAllBtn.classList.add("hidden");
+      updateAllBtn.classList.add("hidden");
+    } else {
+      matchAllBtn.classList.remove("hidden");
+      updateAllBtn.classList.remove("hidden");
+    }
+  }
+
+  async function handleValidationIssueAction(action, issueIndexes) {
+    if (!pendingValidationRemoteState || !issueIndexes.length) return;
+    const closeBtn = $("#close-validation-btn");
+    const matchAllBtn = $("#validation-match-local-all-btn");
+    const updateAllBtn = $("#validation-update-server-all-btn");
+    const shouldPush = action === "update-server-from-local";
+    let changed = false;
+
+    if (closeBtn) closeBtn.disabled = true;
+    if (matchAllBtn) matchAllBtn.disabled = true;
+    if (updateAllBtn) updateAllBtn.disabled = true;
+
+    try {
+      issueIndexes.forEach((index) => {
+        const issue = pendingValidationIssues[index];
+        const result = applyValidationIssueAction(issue, action);
+        if (result && result.changed) {
+          changed = true;
+        }
+      });
+      if (!changed) return;
+      generateTasksForAllProjects();
+      saveStateLocal();
+      renderCurrentScreen();
+      if (shouldPush) {
+        setSyncStatus("Syncing local validation choices to server…");
+        await pushStateGuarded({ forcePull: true });
+      } else {
+        setSyncStatus("Applied local validation changes.");
+      }
+      await rerunPendingValidation();
+    } finally {
+      if (closeBtn) closeBtn.disabled = false;
+      if (matchAllBtn) matchAllBtn.disabled = false;
+      if (updateAllBtn) updateAllBtn.disabled = false;
+    }
+  }
+
+  async function handleValidationResultsClick(event) {
+    const button = event.target.closest(".resync-item-action-btn");
+    if (!button || !button.hasAttribute("data-validation-action")) return;
+    const action = button.getAttribute("data-validation-action");
+    const issueIndex = Number(button.getAttribute("data-validation-index"));
+    if (!Number.isInteger(issueIndex) || issueIndex < 0) return;
+    await handleValidationIssueAction(action, [issueIndex]);
+  }
+
+  async function applyValidationActionToAll(action) {
+    const actionableIndexes = [];
+    pendingValidationIssues.forEach((issue, index) => {
+      if (canResolveValidationIssue(issue)) {
+        actionableIndexes.push(index);
+      }
+    });
+    if (!actionableIndexes.length) return;
+    await handleValidationIssueAction(action, actionableIndexes);
   }
 
   async function fetchValidationRemoteState() {
@@ -1695,9 +1977,11 @@
   }
 
   async function validateCurrentProjectState() {
+    clearValidationActionState();
     const project = currentProjectId ? getProjectMeta(currentProjectId) : null;
     const title = project ? 'Validate "' + project.name + '"' : "Validate Project";
     showValidationModal(title, "Checking local state against the server…", "");
+    refreshValidationActionButtons();
 
     if (!project) {
       showValidationModal(
@@ -1712,7 +1996,8 @@
               projectName: "",
             },
           ],
-          ""
+          "",
+          false
         )
       );
       return;
@@ -1720,7 +2005,8 @@
 
     const { remoteState, issues } = await fetchValidationRemoteState();
     if (!remoteState) {
-      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, ""));
+      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
+      refreshValidationActionButtons();
       return;
     }
 
@@ -1735,13 +2021,19 @@
     const statusText = issues.length
       ? "Found " + issues.length + " validation issue" + (issues.length === 1 ? "" : "s") + "."
       : "Everything is up to date.";
-    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage));
+    pendingValidationRemoteState = remoteState;
+    pendingValidationIssues = issues.slice();
+    pendingValidationMode = "current";
+    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
+    refreshValidationActionButtons();
   }
 
   async function validateVisibleProjectsState() {
+    clearValidationActionState();
     const localVisibleProjects = getVisibleProjectsForState(appState);
     const title = "Validate Projects";
     showValidationModal(title, "Checking visible projects against the server…", "");
+    refreshValidationActionButtons();
 
     if (!localVisibleProjects.length) {
       showValidationModal(
@@ -1756,7 +2048,8 @@
               projectName: "",
             },
           ],
-          ""
+          "",
+          false
         )
       );
       return;
@@ -1764,7 +2057,8 @@
 
     const { remoteState, issues } = await fetchValidationRemoteState();
     if (!remoteState) {
-      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, ""));
+      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
+      refreshValidationActionButtons();
       return;
     }
 
@@ -1793,12 +2087,18 @@
         const remoteProject = remoteVisibleById.get(projectId);
 
         if (!localProject && remoteProject) {
-          pushValidationIssue(issues, "missingLocal", remoteProject.name, "Visible project exists on the server only.");
+          pushValidationIssue(issues, "missingLocal", remoteProject.name, "Visible project exists on the server only.", "", {
+            kind: "project",
+            projectId,
+          });
           return;
         }
 
         if (localProject && !remoteProject) {
-          pushValidationIssue(issues, "missingRemote", localProject.name, "Visible project exists on this device only.");
+          pushValidationIssue(issues, "missingRemote", localProject.name, "Visible project exists on this device only.", "", {
+            kind: "project",
+            projectId,
+          });
           return;
         }
 
@@ -1809,7 +2109,11 @@
     const statusText = issues.length
       ? "Found " + issues.length + " validation issue" + (issues.length === 1 ? "" : "s") + "."
       : "Everything is up to date.";
-    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage));
+    pendingValidationRemoteState = remoteState;
+    pendingValidationIssues = issues.slice();
+    pendingValidationMode = "visible";
+    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
+    refreshValidationActionButtons();
   }
 
   async function openResyncModal() {
@@ -5368,6 +5672,13 @@
     });
 
     $("#close-validation-btn").addEventListener("click", closeValidationModal);
+    $("#validation-match-local-all-btn").addEventListener("click", async () => {
+      await applyValidationActionToAll("match-local-to-server");
+    });
+    $("#validation-update-server-all-btn").addEventListener("click", async () => {
+      await applyValidationActionToAll("update-server-from-local");
+    });
+    $("#validation-results").addEventListener("click", handleValidationResultsClick);
     $("#validation-modal").addEventListener("click", (event) => {
       if (event.target === $("#validation-modal")) {
         closeValidationModal();
