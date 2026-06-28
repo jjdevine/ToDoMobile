@@ -32,6 +32,7 @@ The configuration format is the same as the previous `Projects/*.txt` format:
 
 - Each line is either a comment (`# ...`) or a task rule.
 - Task rules follow the pattern: `task name-daily-daily`, `task name-workdays-workdays`, `task name-weekly-monday,friday`, `task name-monthly-1`, `task name-annual-MM-DD`, `task name-everyNweeks-YYYY-MM-DD`, or `task name-everyNmonths-YYYY-MM-DD` (where N is any positive integer).
+- A rule may optionally end with `[pinned]` or `[end_of_day]` to make every generated task default to that status (e.g. `Morning review-daily-daily [pinned]`).
 
 Once a configuration is saved, the project immediately generates any recurring tasks for the current 7-day window.
 

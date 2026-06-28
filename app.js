@@ -20,7 +20,7 @@
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
+  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*(?:\[(pinned|end_of_day)\])?\s*$/i;
   const WEEKDAY_TOKENS = [
     "sunday",
     "monday",
@@ -2435,6 +2435,9 @@
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean);
+      const flagToken = match[4] ? match[4].trim().toLowerCase() : null;
+      const pinned = flagToken === "pinned";
+      const endOfDay = flagToken === "end_of_day";
 
       const qualifiers = frequency === "weekly"
         ? qualifierTokens.map(parseWeeklyQualifier).filter(Boolean)
@@ -2458,6 +2461,8 @@
         name,
         frequency,
         qualifiers,
+        pinned,
+        endOfDay,
         signature: line.toLowerCase().replace(/\s+/g, ""),
       });
     });
@@ -2823,6 +2828,8 @@
           dueDate: dateKey,
           source: "generated",
           generatedKey,
+          pinned: !!rule.pinned,
+          endOfDay: !rule.pinned && !!rule.endOfDay,
           createdAt: timestamp,
           updatedAt: timestamp,
           completedAt: null,
@@ -4633,6 +4640,10 @@
     if (everyMonthsInterval) everyMonthsInterval.value = "";
     const everyMonthsStart = $("#builder-every-months-start");
     if (everyMonthsStart) everyMonthsStart.value = "";
+    const builderPinned = $("#builder-pinned");
+    if (builderPinned) builderPinned.checked = false;
+    const builderEod = $("#builder-end-of-day");
+    if (builderEod) builderEod.checked = false;
     const builderError = $("#builder-error");
     if (builderError) { builderError.textContent = ""; builderError.classList.add("hidden"); }
     updateBuilderScheduleVisibility();
@@ -4656,6 +4667,14 @@
     everyMonths.classList.toggle("hidden", val !== "everymonths");
     daily.classList.toggle("hidden", val !== "daily");
     workdays.classList.toggle("hidden", val !== "workdays");
+  }
+
+  function getBuilderFlagSuffix() {
+    const pinnedCb = $("#builder-pinned");
+    const eodCb = $("#builder-end-of-day");
+    if (pinnedCb && pinnedCb.checked) return " [pinned]";
+    if (eodCb && eodCb.checked) return " [end_of_day]";
+    return "";
   }
 
   function handleBuilderAddTask() {
@@ -4753,7 +4772,7 @@
       schedule = parts.join(",");
     }
 
-    const line = name + "-" + cadence + "-" + schedule;
+    const line = name + "-" + cadence + "-" + schedule + getBuilderFlagSuffix();
     const textarea = $("#config-modal-textarea");
     if (textarea) {
       const existing = textarea.value;
@@ -4766,7 +4785,7 @@
   }
 
   function appendIntervalRule(name, frequency, start, builderError, nameInput) {
-    const line = name + "-" + frequency + "-" + start;
+    const line = name + "-" + frequency + "-" + start + getBuilderFlagSuffix();
     const textarea = $("#config-modal-textarea");
     if (textarea) {
       const existing = textarea.value;
@@ -5641,6 +5660,12 @@
       radio.addEventListener("change", updateBuilderScheduleVisibility);
     });
     $("#builder-add-btn").addEventListener("click", handleBuilderAddTask);
+    const builderPinnedCb = $("#builder-pinned");
+    const builderEodCb = $("#builder-end-of-day");
+    if (builderPinnedCb && builderEodCb) {
+      builderPinnedCb.addEventListener("change", () => { if (builderPinnedCb.checked) builderEodCb.checked = false; });
+      builderEodCb.addEventListener("change", () => { if (builderEodCb.checked) builderPinnedCb.checked = false; });
+    }
     $("#rtd-task-name-input").addEventListener("change", () => {
       const taskName = $("#rtd-task-name-input").value;
       const descInput = $("#rtd-description-input");
