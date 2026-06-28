@@ -4149,14 +4149,20 @@
       const allTasks = sortActiveTasks(getProjectTasks(projectId));
       const overdueAll = [];
       const todayAll = [];
-      const restAll = [];
+      const futureDatedByDay = {};
+      const undatedAll = [];
       allTasks.forEach((task) => {
         if (task.dueDate && compareDateKeys(task.dueDate, today) < 0) {
           overdueAll.push(task);
         } else if (task.dueDate === today) {
           todayAll.push(task);
+        } else if (task.dueDate) {
+          if (!futureDatedByDay[task.dueDate]) {
+            futureDatedByDay[task.dueDate] = [];
+          }
+          futureDatedByDay[task.dueDate].push(task);
         } else {
-          restAll.push(task);
+          undatedAll.push(task);
         }
       });
       if (overdueAll.length) {
@@ -4176,11 +4182,21 @@
         }));
         taskSections.appendChild(todayWrapper);
       }
-      taskSections.appendChild(buildTaskSection("Upcoming & Undated", restAll, {
-        overdue: false,
-        archived: false,
-        emptyMessage: "No upcoming tasks.",
-      }));
+      const futureDays = Object.keys(futureDatedByDay).sort(compareDateKeys);
+      futureDays.forEach((dateKey) => {
+        taskSections.appendChild(buildTaskSection(formatDateLong(dateKey), futureDatedByDay[dateKey], {
+          overdue: false,
+          archived: false,
+          emptyMessage: "No tasks due on this day.",
+        }));
+      });
+      if (undatedAll.length) {
+        taskSections.appendChild(buildTaskSection("No Due Date", undatedAll, {
+          overdue: false,
+          archived: false,
+          emptyMessage: "No tasks without a due date.",
+        }));
+      }
       return;
     }
 
