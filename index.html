@@ -274,7 +274,7 @@
     <div class="modal-card modal-card-wide">
       <div class="config-modal-body">
         <h3>Project Configuration</h3>
-        <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-daily-daily</code>, <code>task name-workdays-workdays</code>, <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, <code>task name-annual-MM-DD</code>, <code>task name-everyNweeks-YYYY-MM-DD</code>, or <code>task name-everyNmonths-YYYY-MM-DD</code> (where N is any positive integer). Lines starting with <code>#</code> are comments.</p>
+        <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-daily-daily</code>, <code>task name-workdays-workdays</code>, <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, <code>task name-annual-MM-DD</code>, <code>task name-everyNweeks-YYYY-MM-DD</code>, or <code>task name-everyNmonths-YYYY-MM-DD</code> (where N is any positive integer). Optionally append <code>[pinned]</code> or <code>[end_of_day]</code> to a rule to default generated tasks to that status. Lines starting with <code>#</code> are comments.</p>
 
         <div class="task-builder">
           <h4 class="task-builder-heading">Add a new task rule</h4>
@@ -358,6 +358,17 @@
               Generates a task Monday to Friday, excluding weekends.
             </div>
           </div>
+          <div class="task-builder-field">
+            <span class="modal-label">Default status</span>
+            <div class="builder-radio-group">
+              <label class="builder-radio-label">
+                <input type="checkbox" id="builder-pinned"> Pinned
+              </label>
+              <label class="builder-radio-label">
+                <input type="checkbox" id="builder-end-of-day"> End of Day
+              </label>
+            </div>
+          </div>
           <p id="builder-error" class="auth-error hidden"></p>
           <div class="task-builder-actions">
             <button id="builder-add-btn" type="button" class="btn-secondary">Add to config</button>
@@ -369,7 +380,7 @@
             <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
             <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
           </div>
-          <textarea id="config-modal-textarea" placeholder="task name-daily-daily&#10;task name-workdays-workdays&#10;task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
+          <textarea id="config-modal-textarea" placeholder="task name-daily-daily&#10;task name-workdays-workdays&#10;task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;task name-daily-daily [pinned]&#10;task name-workdays-workdays [end_of_day]&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
           <p id="config-modal-error" class="auth-error hidden"></p>
         </form>
 
