@@ -5,6 +5,7 @@
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
   const HIDDEN_PROJECTS_STORAGE_KEY = "task_planner_hidden_projects_v1";
   const RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY = "task_planner_recurring_task_descriptions_v1";
+  const LAST_SYNC_TIME_STORAGE_KEY = "task_planner_last_sync_time_v1";
   const USER_SETTINGS_TABLE = "user_settings";
   const PROJECTS_TABLE = "projects";
   const TASKS_TABLE = "tasks";
@@ -111,6 +112,8 @@
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
   let forcedOfflineStartup = false;
+  let serverUpdatesDisabled = false;
+  let staleUpdateResolver = null;
 
   function nowIso() {
     return new Date().toISOString();
@@ -555,6 +558,27 @@
     }
   }
 
+  function saveLastSyncTime(timestamp) {
+    try {
+      if (timestamp) {
+        localStorage.setItem(LAST_SYNC_TIME_STORAGE_KEY, timestamp);
+      } else {
+        localStorage.removeItem(LAST_SYNC_TIME_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn("Failed to save last sync time:", error);
+    }
+  }
+
+  function loadLastSyncTime() {
+    try {
+      return localStorage.getItem(LAST_SYNC_TIME_STORAGE_KEY) || null;
+    } catch (error) {
+      console.warn("Failed to load last sync time:", error);
+      return null;
+    }
+  }
+
   function hideProject(projectId) {
     hiddenProjectIds.add(projectId);
     saveHiddenProjects();
@@ -612,7 +636,9 @@
   function resetSyncTracking() {
     lastPullAt = 0;
     lastPulledRemoteStateUpdatedAt = null;
+    serverUpdatesDisabled = false;
     requiresFreshPullBeforePush = true;
+    saveLastSyncTime(null);
   }
 
   async function ensureFreshRemoteStateBeforePush(forcePull) {
@@ -1012,17 +1038,37 @@
 
   async function pushStateGuarded(options) {
     if (!supabase || !currentUser) return false;
+    if (serverUpdatesDisabled) return false;
+    // Prevent concurrent pushes from each opening their own stale-update modal.
+    if (staleUpdateResolver) return false;
+
     const forcePull = !!(options && options.forcePull);
 
-    const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
-    if (!pulledBeforePush) return false;
-
+    // Stale update gate: check if server has been updated since our last known sync.
+    // This protects against stale tabs overwriting changes made on other devices.
     if (lastPulledRemoteStateUpdatedAt) {
       try {
         const remoteMarker = await fetchRemoteSyncMarker();
         if (remoteMarker && compareIso(remoteMarker, lastPulledRemoteStateUpdatedAt) > 0) {
-          const pulledAgain = await pullState();
-          if (!pulledAgain) return false;
+          const choice = await openStaleUpdateModal(remoteMarker);
+          if (choice === "cancel") {
+            return false;
+          }
+          if (choice === "reset") {
+            const pulled = await pullState();
+            if (pulled) {
+              generateTasksForAllProjects();
+              renderCurrentScreen();
+              setSyncStatus("Reset to server. Local state is now up to date.");
+            }
+            return false;
+          }
+          if (choice === "disable") {
+            serverUpdatesDisabled = true;
+            setSyncStatus("Server updates disabled. Changes are saved locally only.");
+            return false;
+          }
+          // choice === "push": fall through to normal pull-then-push flow
         }
       } catch (error) {
         console.error("Sync drift check error:", error.message || error);
@@ -1030,6 +1076,9 @@
         return false;
       }
     }
+
+    const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
+    if (!pulledBeforePush) return false;
 
     return pushState();
   }
@@ -1175,6 +1224,7 @@
       lastPullAt = Date.now();
       lastPulledRemoteStateUpdatedAt =
         typeof remoteState.updatedAt === "string" && remoteState.updatedAt ? remoteState.updatedAt : nowIso();
+      saveLastSyncTime(lastPulledRemoteStateUpdatedAt);
       requiresFreshPullBeforePush = false;
       return true;
     } catch (error) {
@@ -2176,6 +2226,46 @@
     pendingResyncRemoteState = null;
     $("#resync-modal").classList.add("hidden");
     $("#resync-modal").setAttribute("aria-hidden", "true");
+  }
+
+  // --- Stale update gate modal ---
+
+  function openStaleUpdateModal(serverTimestamp) {
+    return new Promise((resolve) => {
+      staleUpdateResolver = resolve;
+      const textEl = $("#stale-update-text");
+      if (textEl) {
+        const serverTime = formatTimestamp(serverTimestamp);
+        const clientTime = lastPulledRemoteStateUpdatedAt
+          ? formatTimestamp(lastPulledRemoteStateUpdatedAt)
+          : "unknown";
+        textEl.textContent =
+          "The server was last updated at " + serverTime + ". " +
+          "Your last sync was at " + clientTime + ". " +
+          "Another device may have made changes. What would you like to do?";
+      }
+      const modal = $("#stale-update-modal");
+      if (modal) {
+        modal.classList.remove("hidden");
+        modal.setAttribute("aria-hidden", "false");
+      }
+    });
+  }
+
+  function closeStaleUpdateModal() {
+    const modal = $("#stale-update-modal");
+    if (modal) {
+      modal.classList.add("hidden");
+      modal.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  function resolveStaleUpdate(choice) {
+    closeStaleUpdateModal();
+    if (staleUpdateResolver) {
+      staleUpdateResolver(choice);
+      staleUpdateResolver = null;
+    }
   }
 
   async function confirmResync() {
@@ -5710,6 +5800,15 @@
       }
     });
 
+    $("#stale-push-btn").addEventListener("click", () => resolveStaleUpdate("push"));
+    $("#stale-reset-btn").addEventListener("click", () => resolveStaleUpdate("reset"));
+    $("#stale-disable-btn").addEventListener("click", () => resolveStaleUpdate("disable"));
+    $("#stale-update-modal").addEventListener("click", (event) => {
+      if (event.target === $("#stale-update-modal")) {
+        resolveStaleUpdate("cancel");
+      }
+    });
+
     $("#close-validation-btn").addEventListener("click", closeValidationModal);
     $("#validation-match-local-all-btn").addEventListener("click", async () => {
       await applyValidationActionToAll("match-local-to-server");
@@ -5759,6 +5858,14 @@
     loadLocalRecurringTaskDescriptions();
     loadHiddenProjects();
     rebuildProjectConfigs();
+
+    // Restore the last known sync time from localStorage so the stale update
+    // gate can detect if the server was updated while this tab was away.
+    // pullState() will overwrite this with a fresh value immediately below.
+    const persistedSyncTime = loadLastSyncTime();
+    if (persistedSyncTime) {
+      lastPulledRemoteStateUpdatedAt = persistedSyncTime;
+    }
 
     if (currentUser) {
       await pullState();
