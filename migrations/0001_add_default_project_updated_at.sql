@@ -1,5 +1,6 @@
 -- Adds a dedicated timestamp for default project changes.
 -- This prevents unrelated state updates from overriding default_project_id during merges.
+-- note
 
 alter table todo.user_settings
   add column if not exists default_project_updated_at timestamptz;
