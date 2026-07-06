@@ -1046,7 +1046,8 @@
 
     // Stale update gate: check if server has been updated since our last known sync.
     // This protects against stale tabs overwriting changes made on other devices.
-    if (lastPulledRemoteStateUpdatedAt) {
+    // Skip when forcePull is set: the caller has already handled staleness (e.g. confirmResync).
+    if (lastPulledRemoteStateUpdatedAt && !forcePull) {
       try {
         const remoteMarker = await fetchRemoteSyncMarker();
         if (remoteMarker && compareIso(remoteMarker, lastPulledRemoteStateUpdatedAt) > 0) {
@@ -1068,6 +1069,13 @@
             setSyncStatus("Server updates disabled. Changes are saved locally only.");
             return false;
           }
+          if (choice === "review") {
+            // Open the resync modal so the user can inspect local vs remote differences
+            // before deciding what to do. The push is abandoned for now; the user can
+            // trigger "Sync both sides" from the resync modal to proceed.
+            await openResyncModal();
+            return false;
+          }
           // choice === "push": fall through to normal pull-then-push flow
         }
       } catch (error) {
@@ -1080,7 +1088,14 @@
     const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
     if (!pulledBeforePush) return false;
 
-    return pushState();
+    const pushed = await pushState();
+    if (pushed) {
+      // Post-push pull: refresh local sync marker to reflect the server state we just
+      // wrote. This prevents false stale-update warnings on subsequent pushes from the
+      // same device by keeping lastPulledRemoteStateUpdatedAt current.
+      await pullState();
+    }
+    return pushed;
   }
 
   async function pushState() {
@@ -2242,7 +2257,7 @@
         textEl.textContent =
           "The server was last updated at " + serverTime + ". " +
           "Your last sync was at " + clientTime + ". " +
-          "Another device may have made changes. What would you like to do?";
+          "Server has changes since your last sync. What would you like to do?";
       }
       const modal = $("#stale-update-modal");
       if (modal) {
@@ -5802,6 +5817,7 @@
 
     $("#stale-push-btn").addEventListener("click", () => resolveStaleUpdate("push"));
     $("#stale-reset-btn").addEventListener("click", () => resolveStaleUpdate("reset"));
+    $("#stale-review-btn").addEventListener("click", () => resolveStaleUpdate("review"));
     $("#stale-disable-btn").addEventListener("click", () => resolveStaleUpdate("disable"));
     $("#stale-update-modal").addEventListener("click", (event) => {
       if (event.target === $("#stale-update-modal")) {
