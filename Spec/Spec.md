@@ -2,6 +2,8 @@
 
 This document describes the current implemented functionality of the Task Planner application.
 
+*comment added to force redeploy*
+
 ## Platform and deployment
 
 The app is a web-based task planner designed for desktop and mobile use. It is built with HTML, CSS, and JavaScript and is suitable for deployment to GitHub Pages.
