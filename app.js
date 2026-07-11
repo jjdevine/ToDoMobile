@@ -5481,6 +5481,7 @@
   function buildCsvValue(value) {
     if (value === null || typeof value === "undefined") return "";
     const text = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    if (!/[",\r\n]/.test(text)) return text;
     return '"' + text.replace(/"/g, '""') + '"';
   }
 
@@ -5492,7 +5493,7 @@
     return lines.join("\r\n");
   }
 
-  function formatTimestampForFilename() {
+  function generateFilenameTimestamp() {
     return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[T:]/g, "-");
   }
 
@@ -5689,7 +5690,7 @@
   }
 
   async function downloadPersistenceBackup() {
-    const timestamp = formatTimestampForFilename();
+    const timestamp = generateFilenameTimestamp();
     const tableBackups = buildPersistenceBackupTables();
     for (let index = 0; index < tableBackups.length; index += 1) {
       const tableBackup = tableBackups[index];
