@@ -3167,7 +3167,14 @@
       required: activeTasks.length + archivedTasks.length,
       complete: archivedTasks.length,
       incomplete: activeTasks.length,
+      pinned: activeTasks.filter((task) => task.pinned).length,
+      endOfDay: activeTasks.filter((task) => task.endOfDay).length,
     };
+  }
+
+  function formatIncompleteTaskBreakdown(taskCount, pinnedCount, endOfDayCount) {
+    if (!taskCount) return "";
+    return " (" + pinnedCount + " pinned, " + endOfDayCount + " end of day)";
   }
 
   function setSyncStatus(message) {
@@ -3770,7 +3777,9 @@
       const remainingSummary = "Remaining tasks: " + stats.incomplete + " of " + stats.required;
       metrics.appendChild(
         document.createTextNode(
-          stats.incomplete ? remainingSummary : remainingSummary + " (All tasks complete)"
+          stats.incomplete
+            ? remainingSummary + formatIncompleteTaskBreakdown(stats.incomplete, stats.pinned, stats.endOfDay)
+            : remainingSummary + " (All tasks complete)"
         )
       );
 
@@ -4180,7 +4189,17 @@
 
     const count = document.createElement("div");
     count.className = "section-count";
-    count.textContent = tasks.length + " task" + (tasks.length === 1 ? "" : "s");
+    count.textContent =
+      tasks.length +
+      " task" +
+      (tasks.length === 1 ? "" : "s") +
+      (options.archived
+        ? ""
+        : formatIncompleteTaskBreakdown(
+            tasks.length,
+            tasks.filter((task) => task.pinned).length,
+            tasks.filter((task) => task.endOfDay).length
+          ));
 
     header.appendChild(title);
     header.appendChild(count);
