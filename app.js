@@ -5493,6 +5493,8 @@
     return lines.join("\r\n");
   }
 
+  // Produces an ISO-like UTC timestamp that is safe to embed in download
+  // filenames, e.g. 2026-07-11-14-30-45Z.
   function generateFilenameTimestamp() {
     return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[T:]/g, "-");
   }
@@ -5555,7 +5557,7 @@
 
       Object.keys(project.tasks || {}).forEach((taskId) => {
         const task = project.tasks[taskId];
-        const taskBody = typeof task.description === "string" ? task.description : "";
+        const taskDescription = typeof task.description === "string" ? task.description : "";
         tables.tasks.push({
           user_id: userId,
           project_id: projectId,
@@ -5566,7 +5568,7 @@
           generated_key: task.generatedKey || "",
           pinned: !!task.pinned,
           end_of_day: !!task.endOfDay,
-          body: taskBody,
+          body: taskDescription,
           created_at: task.createdAt || task.updatedAt || "",
           updated_at: task.updatedAt || "",
         });
