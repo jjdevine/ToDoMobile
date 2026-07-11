@@ -5701,6 +5701,7 @@
         buildCsvContents(tableBackup.columns, tableBackup.rows)
       );
       if (index < tableBackups.length - 1) {
+        // Small gap helps browsers treat this as a user-initiated download burst.
         await wait(BACKUP_DOWNLOAD_DELAY_MS);
       }
     }
