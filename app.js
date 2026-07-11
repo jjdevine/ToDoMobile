@@ -5493,7 +5493,7 @@
   }
 
   function formatTimestampForFilename() {
-    return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[:]/g, "-");
+    return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[T:]/g, "-");
   }
 
   function wait(ms) {
@@ -5554,6 +5554,7 @@
 
       Object.keys(project.tasks || {}).forEach((taskId) => {
         const task = project.tasks[taskId];
+        const taskBody = typeof task.description === "string" ? task.description : "";
         tables.tasks.push({
           user_id: userId,
           project_id: projectId,
@@ -5564,7 +5565,7 @@
           generated_key: task.generatedKey || "",
           pinned: !!task.pinned,
           end_of_day: !!task.endOfDay,
-          body: task.description || "",
+          body: taskBody,
           created_at: task.createdAt || task.updatedAt || "",
           updated_at: task.updatedAt || "",
         });
