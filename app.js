@@ -3184,9 +3184,9 @@
   function formatIncompleteTaskBreakdown(taskCount, pinnedCount, endOfDayCount) {
     if (!taskCount) return "";
     const parts = [];
-    if (pinnedCount) parts.push(pinnedCount + " pinned");
-    if (endOfDayCount) parts.push(endOfDayCount + " end of day");
-    return parts.length ? " (" + parts.join(", ") + ")" : "";
+    if (pinnedCount) parts.push(`${pinnedCount} pinned`);
+    if (endOfDayCount) parts.push(`${endOfDayCount} end of day`);
+    return parts.length ? ` (${parts.join(", ")})` : "";
   }
 
   function setSyncStatus(message) {
