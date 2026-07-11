@@ -5492,8 +5492,14 @@
     return lines.join("\r\n");
   }
 
-  function buildBackupTimestamp() {
+  function formatTimestampForFilename() {
     return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[:]/g, "-");
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
   }
 
   function compareBackupValues(a, b) {
@@ -5681,17 +5687,19 @@
     ];
   }
 
-  function downloadPersistenceBackup() {
-    const timestamp = buildBackupTimestamp();
+  async function downloadPersistenceBackup() {
+    const timestamp = formatTimestampForFilename();
     const tableBackups = buildPersistenceBackupTables();
-    tableBackups.forEach((tableBackup, index) => {
-      window.setTimeout(() => {
-        downloadCsvFile(
-          "todo-backup-" + timestamp + "-" + tableBackup.tableName + ".csv",
-          buildCsvContents(tableBackup.columns, tableBackup.rows)
-        );
-      }, index * BACKUP_DOWNLOAD_DELAY_MS);
-    });
+    for (let index = 0; index < tableBackups.length; index += 1) {
+      const tableBackup = tableBackups[index];
+      downloadCsvFile(
+        "todo-backup-" + timestamp + "-" + tableBackup.tableName + ".csv",
+        buildCsvContents(tableBackup.columns, tableBackup.rows)
+      );
+      if (index < tableBackups.length - 1) {
+        await wait(BACKUP_DOWNLOAD_DELAY_MS);
+      }
+    }
   }
 
   function buildTaskExport(projectId, archived) {
