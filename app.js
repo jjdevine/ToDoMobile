@@ -3163,18 +3163,30 @@
   function getDayStats(projectId, dateKey) {
     const activeTasks = getProjectTasks(projectId).filter((task) => task.dueDate === dateKey);
     const archivedTasks = getProjectArchivedTasks(projectId).filter((task) => task.dueDate === dateKey);
+    const taskCategoryCounts = getIncompleteTaskCategoryCounts(activeTasks);
     return {
       required: activeTasks.length + archivedTasks.length,
       complete: archivedTasks.length,
       incomplete: activeTasks.length,
-      pinned: activeTasks.filter((task) => task.pinned).length,
-      endOfDay: activeTasks.filter((task) => task.endOfDay).length,
+      pinned: taskCategoryCounts.pinned,
+      endOfDay: taskCategoryCounts.endOfDay,
     };
+  }
+
+  function getIncompleteTaskCategoryCounts(tasks) {
+    return tasks.reduce((counts, task) => {
+      if (task.pinned) counts.pinned += 1;
+      if (task.endOfDay) counts.endOfDay += 1;
+      return counts;
+    }, { pinned: 0, endOfDay: 0 });
   }
 
   function formatIncompleteTaskBreakdown(taskCount, pinnedCount, endOfDayCount) {
     if (!taskCount) return "";
-    return " (" + pinnedCount + " pinned, " + endOfDayCount + " end of day)";
+    const parts = [];
+    if (pinnedCount) parts.push(pinnedCount + " pinned");
+    if (endOfDayCount) parts.push(endOfDayCount + " end of day");
+    return parts.length ? " (" + parts.join(", ") + ")" : "";
   }
 
   function setSyncStatus(message) {
@@ -4189,6 +4201,9 @@
 
     const count = document.createElement("div");
     count.className = "section-count";
+    const taskCategoryCounts = options.archived
+      ? { pinned: 0, endOfDay: 0 }
+      : getIncompleteTaskCategoryCounts(tasks);
     count.textContent =
       tasks.length +
       " task" +
@@ -4197,8 +4212,8 @@
         ? ""
         : formatIncompleteTaskBreakdown(
             tasks.length,
-            tasks.filter((task) => task.pinned).length,
-            tasks.filter((task) => task.endOfDay).length
+            taskCategoryCounts.pinned,
+            taskCategoryCounts.endOfDay
           ));
 
     header.appendChild(title);
