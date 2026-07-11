@@ -17,6 +17,7 @@
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const COMPLETE_WARNING_LEAD_MS = 1000;
+  const BACKUP_DOWNLOAD_DELAY_MS = 150;
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
@@ -5460,13 +5461,250 @@
   }
 
   function downloadTextFile(filename, contents) {
-    const blob = new Blob([contents], { type: "text/plain;charset=utf-8" });
+    downloadFile(filename, contents, "text/plain;charset=utf-8");
+  }
+
+  function downloadFile(filename, contents, contentType) {
+    const blob = new Blob([contents], { type: contentType || "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function downloadCsvFile(filename, contents) {
+    downloadFile(filename, contents, "text/csv;charset=utf-8");
+  }
+
+  function buildCsvValue(value) {
+    if (value === null || typeof value === "undefined") return "";
+    const text = typeof value === "boolean" ? (value ? "true" : "false") : String(value);
+    if (!/[",\r\n]/.test(text)) return text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+
+  function buildCsvContents(columns, rows) {
+    const lines = [columns.join(",")];
+    rows.forEach((row) => {
+      lines.push(columns.map((column) => buildCsvValue(row[column])).join(","));
+    });
+    return lines.join("\r\n");
+  }
+
+  // Produces an ISO-like UTC timestamp that is safe to embed in download
+  // filenames, e.g. 2026-07-11-14-30-45Z.
+  function generateFilenameTimestamp() {
+    return nowIso().replace(/\.\d{3}Z$/, "Z").replace(/[T:]/g, "-");
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function compareBackupValues(a, b) {
+    const left = a === null || typeof a === "undefined" ? "" : String(a);
+    const right = b === null || typeof b === "undefined" ? "" : String(b);
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+  }
+
+  function sortBackupRows(rows, keys) {
+    return rows.slice().sort((left, right) => {
+      for (let index = 0; index < keys.length; index += 1) {
+        const result = compareBackupValues(left[keys[index]], right[keys[index]]);
+        if (result !== 0) return result;
+      }
+      return 0;
+    });
+  }
+
+  function buildPersistenceBackupTables() {
+    const normalizedState = normalizeState(appState);
+    const userId = currentUser && currentUser.id ? currentUser.id : "";
+    const userSettingsRow = {
+      user_id: userId,
+      default_project_id: normalizedState.defaultProjectId || "",
+      default_project_updated_at: normalizedState.defaultProjectUpdatedAt || normalizedState.updatedAt || "",
+      updated_at: normalizedState.updatedAt || "",
+    };
+    const tables = {
+      archived_tasks: [],
+      generated_occurrences: [],
+      project_tombstones: [],
+      projects: [],
+      recurring_task_descriptions: [],
+      task_tombstones: [],
+      tasks: [],
+      user_settings: [userSettingsRow],
+    };
+
+    Object.keys(normalizedState.projects).forEach((projectId) => {
+      const project = normalizeProjectState(projectId, normalizedState.projects[projectId]);
+      tables.projects.push({
+        user_id: userId,
+        id: projectId,
+        name: project.name || "",
+        inactive: !!project.inactive,
+        last_generated_through: project.lastGeneratedThrough || "",
+        config_text: projectConfigTexts[projectId] || "",
+        updated_at: project.updatedAt || normalizedState.updatedAt || "",
+      });
+
+      Object.keys(project.tasks || {}).forEach((taskId) => {
+        const task = project.tasks[taskId];
+        const taskDescription = typeof task.description === "string" ? task.description : "";
+        tables.tasks.push({
+          user_id: userId,
+          project_id: projectId,
+          id: task.id || taskId,
+          name: task.name || "",
+          due_date: task.dueDate || "",
+          source: task.source === "generated" ? "generated" : "manual",
+          generated_key: task.generatedKey || "",
+          pinned: !!task.pinned,
+          end_of_day: !!task.endOfDay,
+          body: taskDescription,
+          created_at: task.createdAt || task.updatedAt || "",
+          updated_at: task.updatedAt || "",
+        });
+      });
+
+      Object.keys(project.archived || {}).forEach((taskId) => {
+        const task = project.archived[taskId];
+        tables.archived_tasks.push({
+          user_id: userId,
+          project_id: projectId,
+          id: task.id || taskId,
+          name: task.name || "",
+          due_date: task.dueDate || "",
+          source: task.source === "generated" ? "generated" : "manual",
+          generated_key: task.generatedKey || "",
+          pinned: !!task.pinned,
+          end_of_day: !!task.endOfDay,
+          completed_at: task.completedAt || "",
+          created_at: task.createdAt || task.updatedAt || "",
+          updated_at: task.updatedAt || "",
+        });
+      });
+
+      Object.keys(project.generatedOccurrences || {}).forEach((occurrenceKey) => {
+        const occurrence = project.generatedOccurrences[occurrenceKey];
+        tables.generated_occurrences.push({
+          user_id: userId,
+          project_id: projectId,
+          occurrence_key: occurrenceKey,
+          task_id: occurrence.taskId || "",
+          due_date: occurrence.dueDate || "",
+          task_name: occurrence.taskName || "",
+          created_at: occurrence.createdAt || "",
+        });
+      });
+
+      Object.keys(project.deletedTasks || {}).forEach((taskId) => {
+        tables.task_tombstones.push({
+          user_id: userId,
+          project_id: projectId,
+          task_id: taskId,
+          is_archived: false,
+          deleted_at: project.deletedTasks[taskId] || "",
+        });
+      });
+
+      Object.keys(project.deletedArchivedTasks || {}).forEach((taskId) => {
+        tables.task_tombstones.push({
+          user_id: userId,
+          project_id: projectId,
+          task_id: taskId,
+          is_archived: true,
+          deleted_at: project.deletedArchivedTasks[taskId] || "",
+        });
+      });
+    });
+
+    Object.keys(normalizedState.deletedProjects || {}).forEach((projectId) => {
+      tables.project_tombstones.push({
+        user_id: userId,
+        project_id: projectId,
+        deleted_at: normalizedState.deletedProjects[projectId] || "",
+      });
+    });
+
+    Object.keys(recurringTaskDescriptions).forEach((projectId) => {
+      const projectDescriptions = recurringTaskDescriptions[projectId];
+      if (!projectDescriptions || typeof projectDescriptions !== "object") return;
+      Object.keys(projectDescriptions).forEach((taskName) => {
+        tables.recurring_task_descriptions.push({
+          user_id: userId,
+          project_id: projectId,
+          task_name: taskName,
+          description: typeof projectDescriptions[taskName] === "string" ? projectDescriptions[taskName] : "",
+        });
+      });
+    });
+
+    return [
+      {
+        tableName: "archived_tasks",
+        columns: ["user_id", "project_id", "id", "name", "due_date", "source", "generated_key", "pinned", "end_of_day", "completed_at", "created_at", "updated_at"],
+        rows: sortBackupRows(tables.archived_tasks, ["project_id", "id"]),
+      },
+      {
+        tableName: "generated_occurrences",
+        columns: ["user_id", "project_id", "occurrence_key", "task_id", "due_date", "task_name", "created_at"],
+        rows: sortBackupRows(tables.generated_occurrences, ["project_id", "occurrence_key"]),
+      },
+      {
+        tableName: "project_tombstones",
+        columns: ["user_id", "project_id", "deleted_at"],
+        rows: sortBackupRows(tables.project_tombstones, ["project_id"]),
+      },
+      {
+        tableName: "projects",
+        columns: ["user_id", "id", "name", "inactive", "last_generated_through", "config_text", "updated_at"],
+        rows: sortBackupRows(tables.projects, ["id"]),
+      },
+      {
+        tableName: "recurring_task_descriptions",
+        columns: ["user_id", "project_id", "task_name", "description"],
+        rows: sortBackupRows(tables.recurring_task_descriptions, ["project_id", "task_name"]),
+      },
+      {
+        tableName: "task_tombstones",
+        columns: ["user_id", "project_id", "task_id", "is_archived", "deleted_at"],
+        rows: sortBackupRows(tables.task_tombstones, ["project_id", "task_id", "is_archived"]),
+      },
+      {
+        tableName: "tasks",
+        columns: ["user_id", "project_id", "id", "name", "due_date", "source", "generated_key", "pinned", "end_of_day", "body", "created_at", "updated_at"],
+        rows: sortBackupRows(tables.tasks, ["project_id", "id"]),
+      },
+      {
+        tableName: "user_settings",
+        columns: ["user_id", "default_project_id", "default_project_updated_at", "updated_at"],
+        rows: tables.user_settings,
+      },
+    ];
+  }
+
+  async function downloadPersistenceBackup() {
+    const timestamp = generateFilenameTimestamp();
+    const tableBackups = buildPersistenceBackupTables();
+    for (let index = 0; index < tableBackups.length; index += 1) {
+      const tableBackup = tableBackups[index];
+      downloadCsvFile(
+        "todo-backup-" + timestamp + "-" + tableBackup.tableName + ".csv",
+        buildCsvContents(tableBackup.columns, tableBackup.rows)
+      );
+      if (index < tableBackups.length - 1) {
+        // Small gap helps browsers treat this as a user-initiated download burst.
+        await wait(BACKUP_DOWNLOAD_DELAY_MS);
+      }
+    }
   }
 
   function buildTaskExport(projectId, archived) {
@@ -5675,6 +5913,7 @@
     $("#open-home-add-task-btn").addEventListener("click", () => {
       openAddTaskModal(null);
     });
+    $("#download-persistence-backup-btn").addEventListener("click", downloadPersistenceBackup);
     $("#download-all-archives-btn").addEventListener("click", downloadAllArchivedTasks);
     $("#delete-all-archives-btn").addEventListener("click", deleteAllArchivedTasks);
     const forceOfflineBtn = $("#force-offline-mode-btn");
