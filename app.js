@@ -17,6 +17,7 @@
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const COMPLETE_WARNING_LEAD_MS = 1000;
+  const BACKUP_DOWNLOAD_DELAY_MS = 150;
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
@@ -5632,8 +5633,6 @@
           project_id: projectId,
           task_name: taskName,
           description: typeof projectDescriptions[taskName] === "string" ? projectDescriptions[taskName] : "",
-          created_at: "",
-          updated_at: "",
         });
       });
     });
@@ -5661,7 +5660,7 @@
       },
       {
         tableName: "recurring_task_descriptions",
-        columns: ["user_id", "project_id", "task_name", "description", "created_at", "updated_at"],
+        columns: ["user_id", "project_id", "task_name", "description"],
         rows: sortBackupRows(tables.recurring_task_descriptions, ["project_id", "task_name"]),
       },
       {
@@ -5691,7 +5690,7 @@
           "todo-backup-" + timestamp + "-" + tableBackup.tableName + ".csv",
           buildCsvContents(tableBackup.columns, tableBackup.rows)
         );
-      }, index * 150);
+      }, index * BACKUP_DOWNLOAD_DELAY_MS);
     });
   }
 
