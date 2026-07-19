@@ -319,6 +319,24 @@ select {
   color: #aae0be;
 }
 
+.project-card-tags {
+  border: 1px solid rgba(190, 150, 85, 0.56);
+  border-radius: 999px;
+  background: rgba(78, 53, 24, 0.3);
+  color: #dfbf93;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.project-card-tags:hover {
+  border-color: rgba(220, 175, 95, 0.82);
+  background: rgba(98, 68, 30, 0.45);
+  color: #f7dfbf;
+}
+
 .project-card-hidden {
   opacity: 0.65;
   border-style: dashed;
@@ -532,8 +550,12 @@ select {
 
 .project-create-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.project-create-actions {
+  grid-column: 1 / -1;
 }
 
 .create-project-panel {
@@ -543,6 +565,44 @@ select {
 .project-create-actions {
   display: flex;
   gap: 0.75rem;
+}
+
+.project-tag-filters {
+  margin-top: -0.2rem;
+}
+
+.project-tag-filters-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.project-tag-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.tag-filter-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: var(--text);
+  padding: 0.36rem 0.68rem;
+  font-size: 0.82rem;
+}
+
+.tag-filter-option input {
+  accent-color: var(--accent);
+}
+
+.tag-filter-option-all {
+  border-color: rgba(108, 140, 255, 0.45);
+  background: rgba(108, 140, 255, 0.12);
 }
 
 .auth-form input,

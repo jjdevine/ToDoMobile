@@ -71,6 +71,14 @@
         <button id="delete-all-archives-btn" type="button" class="btn-danger hidden" disabled>Delete all archived tasks</button>
       </div>
 
+      <section id="project-tag-filters" class="panel project-tag-filters hidden">
+        <div class="panel-heading project-tag-filters-heading">
+          <h3>Project Tag Filters</h3>
+          <p id="project-tag-filter-summary" class="subtitle"></p>
+        </div>
+        <div id="project-tag-filter-options" class="project-tag-filter-options"></div>
+      </section>
+
       <section id="create-project-panel" class="panel create-project-panel hidden">
         <div class="panel-heading">
           <h3>New Project</h3>
@@ -78,6 +86,7 @@
         </div>
         <form id="create-project-form" class="project-create-form">
           <input type="text" id="create-project-name-input" placeholder="Project name" required maxlength="120">
+          <input type="text" id="create-project-tags-input" placeholder="Tags (comma separated, optional)" maxlength="240">
           <div class="project-create-actions">
             <button type="button" id="cancel-create-project-btn" class="btn-secondary">Cancel</button>
             <button type="submit" class="btn-primary">Create project</button>

@@ -4,6 +4,7 @@
   const STORAGE_KEY = "task_planner_state_v1";
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
   const HIDDEN_PROJECTS_STORAGE_KEY = "task_planner_hidden_projects_v1";
+  const PROJECT_TAG_FILTERS_STORAGE_KEY = "task_planner_project_tag_filters_v1";
   const RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY = "task_planner_recurring_task_descriptions_v1";
   const LAST_SYNC_TIME_STORAGE_KEY = "task_planner_last_sync_time_v1";
   const USER_SETTINGS_TABLE = "user_settings";
@@ -14,6 +15,8 @@
   const TASK_TOMBSTONES_TABLE = "task_tombstones";
   const PROJECT_TOMBSTONES_TABLE = "project_tombstones";
   const RECURRING_TASK_DESCRIPTIONS_TABLE = "recurring_task_descriptions";
+  const TAGS_TABLE = "tags";
+  const PROJECT_TAGS_TABLE = "project_tags";
   const SAVE_DELAY_MS = 2000;
   const COMPLETE_DELAY_MS = 2000;
   const COMPLETE_WARNING_LEAD_MS = 1000;
@@ -108,6 +111,7 @@
   // startup and fetched from Supabase when signed in.
   let recurringTaskDescriptions = {};
   let hiddenProjectIds = new Set();
+  let selectedProjectTagFilters = new Set();
   let showHiddenProjects = false;
   let showProjectActions = false;
   let appState = createEmptyState();
@@ -136,6 +140,7 @@
     return {
       projectId,
       name: name || "",
+      tags: [],
       inactive: false,
       tasks: {},
       archived: {},
@@ -321,6 +326,34 @@
     return normalized;
   }
 
+  function normalizeTagValue(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  function normalizeTagList(rawTags) {
+    if (!Array.isArray(rawTags)) return [];
+    const uniqueTags = new Set();
+    rawTags.forEach((rawTag) => {
+      const normalizedTag = normalizeTagValue(rawTag);
+      if (normalizedTag) {
+        uniqueTags.add(normalizedTag);
+      }
+    });
+    return Array.from(uniqueTags).sort((a, b) => a.localeCompare(b));
+  }
+
+  function parseTagInput(inputText) {
+    if (!inputText) return [];
+    return normalizeTagList(String(inputText).split(","));
+  }
+
+  function formatProjectTags(tags) {
+    return normalizeTagList(tags).join(", ");
+  }
+
   function normalizeProjectState(projectId, rawProject) {
     if (!isPlainObject(rawProject)) {
       return createEmptyProjectState(projectId, "");
@@ -329,6 +362,7 @@
     return {
       projectId,
       name: typeof rawProject.name === "string" ? rawProject.name : "",
+      tags: normalizeTagList(rawProject.tags),
       inactive: typeof rawProject.inactive === "boolean" ? rawProject.inactive : false,
       tasks: normalizeTaskMap(rawProject.tasks, projectId, false),
       archived: normalizeTaskMap(rawProject.archived, projectId, true),
@@ -473,11 +507,13 @@
       mergedDeletedTasks,
       mergedDeletedArchivedTasks
     );
+    const localProjectWinsMetadata = compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0;
 
     return {
       projectId,
       name: normalizedRemote.name || normalizedLocal.name || "",
-      inactive: compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0 ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
+      tags: localProjectWinsMetadata ? normalizedLocal.tags : normalizedRemote.tags,
+      inactive: localProjectWinsMetadata ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
       tasks: completionReconciled.tasks,
       archived: completionReconciled.archived,
       generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
@@ -556,6 +592,25 @@
       localStorage.setItem(HIDDEN_PROJECTS_STORAGE_KEY, JSON.stringify(Array.from(hiddenProjectIds)));
     } catch (error) {
       console.warn("Failed to save hidden projects:", error);
+    }
+  }
+
+  function loadProjectTagFilters() {
+    try {
+      const raw = localStorage.getItem(PROJECT_TAG_FILTERS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      selectedProjectTagFilters = new Set(normalizeTagList(parsed));
+    } catch (error) {
+      console.warn("Failed to load project tag filters:", error);
+      selectedProjectTagFilters = new Set();
+    }
+  }
+
+  function saveProjectTagFilters() {
+    try {
+      localStorage.setItem(PROJECT_TAG_FILTERS_STORAGE_KEY, JSON.stringify(Array.from(selectedProjectTagFilters)));
+    } catch (error) {
+      console.warn("Failed to save project tag filters:", error);
     }
   }
 
@@ -661,6 +716,8 @@
         generatedOccurrences: [],
         tombstones: [],
         projectTombstones: [],
+        tags: [],
+        projectTags: [],
       };
     }
 
@@ -677,6 +734,8 @@
       generatedOccurrences: [],
       tombstones: [],
       projectTombstones: [],
+      tags: [],
+      projectTags: [],
     };
 
     Object.keys(normalizedState.projects).forEach((projectId) => {
@@ -689,6 +748,18 @@
         inactive: !!project.inactive,
         last_generated_through: project.lastGeneratedThrough,
         updated_at: project.updatedAt || normalizedState.updatedAt || nowIso(),
+      });
+
+      project.tags.forEach((tag) => {
+        rows.tags.push({
+          user_id: userId,
+          tag,
+        });
+        rows.projectTags.push({
+          user_id: userId,
+          project_id: projectId,
+          tag,
+        });
       });
 
       Object.keys(project.tasks || {}).forEach((taskId) => {
@@ -769,6 +840,14 @@
       });
     });
 
+    const dedupedTags = new Map();
+    rows.tags.forEach((row) => {
+      if (!dedupedTags.has(row.tag)) {
+        dedupedTags.set(row.tag, row);
+      }
+    });
+    rows.tags = Array.from(dedupedTags.values());
+
     return rows;
   }
 
@@ -783,6 +862,7 @@
     const payloadDescriptions = Array.isArray(payload.descriptions) ? payload.descriptions : [];
     const payloadTombstones = Array.isArray(payload.tombstones) ? payload.tombstones : [];
     const payloadProjectTombstones = Array.isArray(payload.projectTombstones) ? payload.projectTombstones : [];
+    const payloadProjectTags = Array.isArray(payload.projectTags) ? payload.projectTags : [];
 
     if (payload.userSettings) {
       nextState.defaultProjectId =
@@ -818,6 +898,20 @@
             : nowIso(),
       };
       nextState.updatedAt = laterIso(nextState.updatedAt, projectsById[projectId].updatedAt);
+    });
+
+    payloadProjectTags.forEach((row) => {
+      if (!row || typeof row.project_id !== "string") return;
+      const projectId = row.project_id;
+      const tag = normalizeTagValue(row.tag);
+      if (!tag) return;
+      if (!projectsById[projectId]) {
+        projectsById[projectId] = createEmptyProjectState(projectId, "");
+      }
+      const projectTags = normalizeTagList(projectsById[projectId].tags);
+      if (projectTags.indexOf(tag) >= 0) return;
+      projectTags.push(tag);
+      projectsById[projectId].tags = normalizeTagList(projectTags);
     });
 
     payloadTasks.forEach((row) => {
@@ -945,6 +1039,8 @@
       generatedOccurrencesRes,
       tombstonesRes,
       projectTombstonesRes,
+      tagsRes,
+      projectTagsRes,
     ] = await Promise.all([
       supabase
         .schema("todo")
@@ -958,6 +1054,8 @@
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
       supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("project_id, task_id, is_archived, deleted_at").eq("user_id", userId),
       supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("project_id, deleted_at").eq("user_id", userId),
+      supabase.schema("todo").from(TAGS_TABLE).select("tag").eq("user_id", userId),
+      supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("project_id, tag").eq("user_id", userId),
     ]);
 
     const firstError = [
@@ -968,6 +1066,8 @@
       generatedOccurrencesRes.error,
       tombstonesRes.error,
       projectTombstonesRes.error,
+      tagsRes.error,
+      projectTagsRes.error,
     ].find(Boolean);
 
     if (firstError) {
@@ -983,6 +1083,8 @@
       descriptions: [],
       tombstones: tombstonesRes.data || [],
       projectTombstones: projectTombstonesRes.data || [],
+      tags: tagsRes.data || [],
+      projectTags: projectTagsRes.data || [],
     });
   }
 
@@ -990,13 +1092,24 @@
     if (!supabase || !currentUser) return null;
     const userId = currentUser.id;
 
-    const [userSettingsRes, projectsRes, tasksRes, archivedTasksRes, tombstonesRes, projectTombstonesRes] = await Promise.all([
+    const [
+      userSettingsRes,
+      projectsRes,
+      tasksRes,
+      archivedTasksRes,
+      tombstonesRes,
+      projectTombstonesRes,
+      tagsRes,
+      projectTagsRes,
+    ] = await Promise.all([
       supabase.schema("todo").from(USER_SETTINGS_TABLE).select("updated_at").eq("user_id", userId).maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
       supabase.schema("todo").from(TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
       supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
       supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
       supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(TAGS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
+      supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1),
     ]);
 
     const firstError = [
@@ -1006,6 +1119,8 @@
       archivedTasksRes.error,
       tombstonesRes.error,
       projectTombstonesRes.error,
+      tagsRes.error,
+      projectTagsRes.error,
     ].find(Boolean);
     if (firstError) throw firstError;
 
@@ -1032,6 +1147,14 @@
     const latestProjectTombstone = Array.isArray(projectTombstonesRes.data) ? projectTombstonesRes.data[0] : null;
     if (latestProjectTombstone && typeof latestProjectTombstone.deleted_at === "string" && latestProjectTombstone.deleted_at) {
       candidates.push(latestProjectTombstone.deleted_at);
+    }
+    const latestTag = Array.isArray(tagsRes.data) ? tagsRes.data[0] : null;
+    if (latestTag && typeof latestTag.updated_at === "string" && latestTag.updated_at) {
+      candidates.push(latestTag.updated_at);
+    }
+    const latestProjectTag = Array.isArray(projectTagsRes.data) ? projectTagsRes.data[0] : null;
+    if (latestProjectTag && typeof latestProjectTag.created_at === "string" && latestProjectTag.created_at) {
+      candidates.push(latestProjectTag.created_at);
     }
 
     return candidates.reduce((latest, value) => (latest && compareIso(latest, value) >= 0 ? latest : value), null);
@@ -1113,11 +1236,15 @@
         remoteTasksRes,
         remoteArchivedTasksRes,
         remoteGeneratedOccurrencesRes,
+        remoteTagsRes,
+        remoteProjectTagsRes,
       ] = await Promise.all([
         supabase.schema("todo").from(PROJECTS_TABLE).select("id").eq("user_id", userId),
         supabase.schema("todo").from(TASKS_TABLE).select("project_id, id").eq("user_id", userId),
         supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("project_id, id").eq("user_id", userId),
         supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("project_id, occurrence_key").eq("user_id", userId),
+        supabase.schema("todo").from(TAGS_TABLE).select("tag").eq("user_id", userId),
+        supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("project_id, tag").eq("user_id", userId),
       ]);
 
       const remoteFetchError = [
@@ -1125,6 +1252,8 @@
         remoteTasksRes.error,
         remoteArchivedTasksRes.error,
         remoteGeneratedOccurrencesRes.error,
+        remoteTagsRes.error,
+        remoteProjectTagsRes.error,
       ].find(Boolean);
       if (remoteFetchError) {
         console.error("Sync push error:", remoteFetchError.message);
@@ -1136,6 +1265,8 @@
       const localTaskKeys = new Set(rows.tasks.map((row) => row.project_id + "::" + row.id));
       const localArchivedTaskKeys = new Set(rows.archivedTasks.map((row) => row.project_id + "::" + row.id));
       const localOccurrenceKeys = new Set(rows.generatedOccurrences.map((row) => row.project_id + "::" + row.occurrence_key));
+      const localTags = new Set(rows.tags.map((row) => row.tag));
+      const localProjectTagKeys = new Set(rows.projectTags.map((row) => row.project_id + "::" + row.tag));
 
       const deleteOperations = [];
       (remoteProjectsRes.data || []).forEach((row) => {
@@ -1169,6 +1300,20 @@
               .eq("user_id", userId)
               .eq("project_id", row.project_id)
               .eq("occurrence_key", row.occurrence_key)
+          );
+        }
+      });
+      (remoteProjectTagsRes.data || []).forEach((row) => {
+        if (!localProjectTagKeys.has(row.project_id + "::" + row.tag)) {
+          deleteOperations.push(
+            supabase.schema("todo").from(PROJECT_TAGS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("tag", row.tag)
+          );
+        }
+      });
+      (remoteTagsRes.data || []).forEach((row) => {
+        if (!localTags.has(row.tag)) {
+          deleteOperations.push(
+            supabase.schema("todo").from(TAGS_TABLE).delete().eq("user_id", userId).eq("tag", row.tag)
           );
         }
       });
@@ -1208,6 +1353,16 @@
       if (rows.projectTombstones.length) {
         upsertOperations.push(
           supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).upsert(rows.projectTombstones, { onConflict: "user_id,project_id" })
+        );
+      }
+      if (rows.tags.length) {
+        upsertOperations.push(
+          supabase.schema("todo").from(TAGS_TABLE).upsert(rows.tags, { onConflict: "user_id,tag" })
+        );
+      }
+      if (rows.projectTags.length) {
+        upsertOperations.push(
+          supabase.schema("todo").from(PROJECT_TAGS_TABLE).upsert(rows.projectTags, { onConflict: "user_id,project_id,tag" })
         );
       }
 
@@ -1430,19 +1585,26 @@
     return { remoteNewer, localNewer };
   }
 
-  function getVisibleProjectsForState(state) {
+  function getVisibleProjectsForState(state, options) {
     const normalized = normalizeState(state);
+    const selectedTags = options && options.selectedTags instanceof Set ? options.selectedTags : selectedProjectTagFilters;
+    const applyTagFilter = !(options && options.applyTagFilter === false);
     return Object.keys(normalized.projects)
       .map((projectId) => {
         const projectState = normalized.projects[projectId];
         return {
           id: projectId,
           name: projectState && projectState.name ? projectState.name : projectId,
+          tags: normalizeTagList(projectState && projectState.tags),
           inactive: !!(projectState && projectState.inactive),
           hidden: hiddenProjectIds.has(projectId),
         };
       })
       .filter((project) => project.name && !project.inactive && (!project.hidden || showHiddenProjects))
+      .filter((project) => {
+        if (!applyTagFilter || !selectedTags || selectedTags.size === 0) return true;
+        return project.tags.some((tag) => selectedTags.has(tag));
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -2833,10 +2995,11 @@
   }
 
   function getAllProjects() {
-    return getVisibleProjectsForState(appState)
+    return getVisibleProjectsForState(appState, { applyTagFilter: false })
       .map((project) => ({
         id: project.id,
         name: project.name,
+        tags: normalizeTagList(project.tags),
         hasConfig: !!(projectConfigs[project.id] && projectConfigs[project.id].length > 0),
         hidden: project.hidden,
       }));
@@ -2864,6 +3027,7 @@
     return {
       id: projectId,
       name: projectState.name,
+      tags: normalizeTagList(projectState.tags),
       hasConfig: !!(projectConfigs[projectId] && projectConfigs[projectId].length > 0),
     };
   }
@@ -3346,7 +3510,9 @@
     const projectGrid = $("#project-grid");
     const emptyState = $("#home-empty");
     projectGrid.innerHTML = "";
-    const projects = getAllProjects();
+    const allVisibleProjects = getAllProjects();
+    renderHomeTagFilters(allVisibleProjects);
+    const projects = getTagFilteredProjects(allVisibleProjects, selectedProjectTagFilters);
     const toggleProjectActionsBtn = $("#toggle-project-actions-btn");
     if (toggleProjectActionsBtn) {
       toggleProjectActionsBtn.textContent = showProjectActions ? "Hide Project Actions" : "Show Project Actions";
@@ -3403,6 +3569,7 @@
     projects.forEach((project) => {
       const stats = buildProjectStats(project.id);
       const projectState = ensureProjectState(project.id, project.name);
+      const projectTags = normalizeTagList(projectState.tags);
       const isDefault = appState.defaultProjectId === project.id;
       const isHidden = project.hidden;
       const card = document.createElement("div");
@@ -3448,6 +3615,17 @@
       });
       topRowActions.appendChild(deleteButton);
 
+      const tagsButton = document.createElement("button");
+      tagsButton.type = "button";
+      tagsButton.className = "project-card-tags";
+      tagsButton.textContent = "Tags";
+      tagsButton.title = "Edit project tags";
+      tagsButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        promptEditProjectTags(project.id);
+      });
+      topRowActions.appendChild(tagsButton);
+
       if (isHidden) {
         const unhideButton = document.createElement("button");
         unhideButton.type = "button";
@@ -3488,6 +3666,13 @@
       const meta = document.createElement("div");
       meta.className = "project-card-meta";
       meta.appendChild(createChip(project.hasConfig ? "recurring" : "manual project"));
+      if (projectTags.length) {
+        projectTags.forEach((tag) => {
+          meta.appendChild(createChip("tag", tag));
+        });
+      } else {
+        meta.appendChild(createChip("no tags"));
+      }
       meta.appendChild(createChip("due today", String(stats.dueToday)));
       meta.appendChild(createChip("overdue", String(stats.overdue)));
       meta.appendChild(createChip("no date", String(stats.noDueDate)));
@@ -4653,13 +4838,130 @@
     openButton.classList.remove("hidden");
     openButton.setAttribute("aria-expanded", "false");
     input.value = "";
+    const tagsInput = $("#create-project-tags-input");
+    if (tagsInput) tagsInput.value = "";
+  }
+
+  function setProjectTags(projectId, nextTags) {
+    const projectState = ensureProjectState(projectId, "");
+    const normalizedTags = normalizeTagList(nextTags);
+    const currentTags = normalizeTagList(projectState.tags);
+    if (currentTags.join("|") === normalizedTags.join("|")) {
+      return false;
+    }
+    projectState.tags = normalizedTags;
+    touchProject(projectState);
+    schedulePersist("Saving changes...");
+    return true;
+  }
+
+  function promptEditProjectTags(projectId) {
+    const project = getProjectMeta(projectId);
+    if (!project) return;
+    const initialValue = formatProjectTags(project.tags);
+    const entered = prompt('Edit tags for "' + project.name + '" (comma separated):', initialValue);
+    if (entered === null) return;
+    const nextTags = parseTagInput(entered);
+    if (setProjectTags(projectId, nextTags)) {
+      renderCurrentScreen();
+    }
+  }
+
+  function getTagFilteredProjects(projects, selectedTags) {
+    if (!selectedTags || selectedTags.size === 0) return projects;
+    return projects.filter((project) => project.tags.some((tag) => selectedTags.has(tag)));
+  }
+
+  function renderHomeTagFilters(allVisibleProjects) {
+    const panel = $("#project-tag-filters");
+    const options = $("#project-tag-filter-options");
+    const summary = $("#project-tag-filter-summary");
+    if (!panel || !options || !summary) return;
+
+    const availableTagSet = new Set();
+    allVisibleProjects.forEach((project) => {
+      normalizeTagList(project.tags).forEach((tag) => availableTagSet.add(tag));
+    });
+    const availableTags = Array.from(availableTagSet).sort((a, b) => a.localeCompare(b));
+
+    const cleanedFilters = new Set();
+    selectedProjectTagFilters.forEach((tag) => {
+      if (availableTagSet.has(tag)) {
+        cleanedFilters.add(tag);
+      }
+    });
+    if (cleanedFilters.size !== selectedProjectTagFilters.size) {
+      selectedProjectTagFilters = cleanedFilters;
+      saveProjectTagFilters();
+    }
+
+    if (!availableTags.length) {
+      panel.classList.add("hidden");
+      options.innerHTML = "";
+      summary.textContent = "";
+      return;
+    }
+
+    panel.classList.remove("hidden");
+    options.innerHTML = "";
+
+    const allLabel = document.createElement("label");
+    allLabel.className = "tag-filter-option tag-filter-option-all";
+    const allCheckbox = document.createElement("input");
+    allCheckbox.type = "checkbox";
+    allCheckbox.checked = selectedProjectTagFilters.size === 0;
+    allCheckbox.addEventListener("change", () => {
+      if (allCheckbox.checked) {
+        selectedProjectTagFilters = new Set();
+        saveProjectTagFilters();
+        renderHome();
+      } else if (availableTags.length) {
+        selectedProjectTagFilters = new Set([availableTags[0]]);
+        saveProjectTagFilters();
+        renderHome();
+      }
+    });
+    const allText = document.createElement("span");
+    allText.textContent = "All";
+    allLabel.appendChild(allCheckbox);
+    allLabel.appendChild(allText);
+    options.appendChild(allLabel);
+
+    availableTags.forEach((tag) => {
+      const label = document.createElement("label");
+      label.className = "tag-filter-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedProjectTagFilters.has(tag);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedProjectTagFilters.add(tag);
+        } else {
+          selectedProjectTagFilters.delete(tag);
+        }
+        saveProjectTagFilters();
+        renderHome();
+      });
+      const text = document.createElement("span");
+      text.textContent = tag;
+      label.appendChild(checkbox);
+      label.appendChild(text);
+      options.appendChild(label);
+    });
+
+    const filteredCount = getTagFilteredProjects(allVisibleProjects, selectedProjectTagFilters).length;
+    summary.textContent = selectedProjectTagFilters.size === 0
+      ? "Showing all projects"
+      : "Showing " + filteredCount + " project" + (filteredCount === 1 ? "" : "s") + " matching selected tags";
   }
 
   function createManualProject(event) {
     event.preventDefault();
 
     const nameInput = $("#create-project-name-input");
+    const tagsInput = $("#create-project-tags-input");
     const name = nameInput.value.trim();
+    const tags = parseTagInput(tagsInput ? tagsInput.value : "");
     if (!name) return;
 
     const existingProject = [...getAllProjects(), ...getInactiveProjects()].find((project) => project.name.toLowerCase() === name.toLowerCase());
@@ -4674,6 +4976,7 @@
 
     const projectId = buildProjectId(name);
     const projectState = ensureProjectState(projectId, name);
+    projectState.tags = tags;
     touchProject(projectState);
     schedulePersist("Saving changes...");
     nameInput.value = "";
@@ -5570,8 +5873,10 @@
       archived_tasks: [],
       generated_occurrences: [],
       project_tombstones: [],
+      project_tags: [],
       projects: [],
       recurring_task_descriptions: [],
+      tags: [],
       task_tombstones: [],
       tasks: [],
       user_settings: [userSettingsRow],
@@ -5587,6 +5892,18 @@
         last_generated_through: project.lastGeneratedThrough || "",
         config_text: projectConfigTexts[projectId] || "",
         updated_at: project.updatedAt || normalizedState.updatedAt || "",
+      });
+
+      normalizeTagList(project.tags).forEach((tag) => {
+        tables.tags.push({
+          user_id: userId,
+          tag,
+        });
+        tables.project_tags.push({
+          user_id: userId,
+          project_id: projectId,
+          tag,
+        });
       });
 
       Object.keys(project.tasks || {}).forEach((taskId) => {
@@ -5681,6 +5998,11 @@
       });
     });
 
+    tables.tags = sortBackupRows(
+      Array.from(new Map(tables.tags.map((row) => [row.tag, row])).values()),
+      ["tag"]
+    );
+
     return [
       {
         tableName: "archived_tasks",
@@ -5698,6 +6020,11 @@
         rows: sortBackupRows(tables.project_tombstones, ["project_id"]),
       },
       {
+        tableName: "project_tags",
+        columns: ["user_id", "project_id", "tag"],
+        rows: sortBackupRows(tables.project_tags, ["project_id", "tag"]),
+      },
+      {
         tableName: "projects",
         columns: ["user_id", "id", "name", "inactive", "last_generated_through", "config_text", "updated_at"],
         rows: sortBackupRows(tables.projects, ["id"]),
@@ -5706,6 +6033,11 @@
         tableName: "recurring_task_descriptions",
         columns: ["user_id", "project_id", "task_name", "description"],
         rows: sortBackupRows(tables.recurring_task_descriptions, ["project_id", "task_name"]),
+      },
+      {
+        tableName: "tags",
+        columns: ["user_id", "tag"],
+        rows: tables.tags,
       },
       {
         tableName: "task_tombstones",
@@ -6146,6 +6478,7 @@
     loadLocalProjectConfigs();
     loadLocalRecurringTaskDescriptions();
     loadHiddenProjects();
+    loadProjectTagFilters();
     rebuildProjectConfigs();
 
     // Restore the last known sync time from localStorage so the stale update
