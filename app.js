@@ -1425,6 +1425,76 @@
     }
   }
 
+  async function resetLocalStateFromServer() {
+    if (!currentUser || !supabase) {
+      showToast("Sign in to reset local state from server.");
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setSyncStatus("Cannot reset while offline.");
+      showToast("Reconnect to the internet and try again.");
+      return;
+    }
+
+    if (!confirm("Wipe all local state on this device and download a fresh copy from the server?")) {
+      return;
+    }
+
+    setSyncStatus("Fetching latest server state...");
+
+    try {
+      const remoteState = await fetchNormalizedRemoteState();
+      if (!remoteState) {
+        setSyncStatus("Could not load server state.");
+        showToast("Could not load server state.");
+        return;
+      }
+
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      clearAllPendingTaskCompletions();
+      deferTaskId = null;
+      editTaskId = null;
+      appState = createEmptyState();
+      projectConfigTexts = {};
+      projectConfigs = {};
+      recurringTaskDescriptions = {};
+      hiddenProjectIds = new Set();
+      selectedProjectTagFilters = new Set();
+      showHiddenProjects = false;
+      currentProjectId = null;
+      resetSyncTracking();
+      saveStateLocal();
+      saveLocalProjectConfigs();
+      saveLocalRecurringTaskDescriptions();
+      saveHiddenProjects();
+      saveProjectTagFilters();
+
+      appState = normalizeState(remoteState);
+      saveStateLocal();
+      lastPullAt = Date.now();
+      lastPulledRemoteStateUpdatedAt =
+        typeof remoteState.updatedAt === "string" && remoteState.updatedAt ? remoteState.updatedAt : nowIso();
+      saveLastSyncTime(lastPulledRemoteStateUpdatedAt);
+      requiresFreshPullBeforePush = false;
+
+      await fetchAllProjectConfigsFromDb();
+      await fetchAllRecurringTaskDescriptionsFromDb();
+      rebuildProjectConfigs();
+      generateTasksForAllProjects();
+      renderHome();
+      showScreen("home");
+      setSyncStatus("Local state reset and refreshed from server.");
+      showToast("Local state was reset and re-downloaded from server.");
+    } catch (error) {
+      console.error("Reset local state error:", error);
+      showServerConnectionIssue(error, "local-state-reset");
+      setSyncStatus("Could not reset local state from server.");
+      showToast("Could not reset local state from server.");
+    }
+  }
+
   // --- Force resync: compare local vs remote and confirm before merging ---
 
   async function fetchRemoteStateRaw() {
@@ -6402,6 +6472,12 @@
       $("#sync-now-btn").disabled = true;
       await syncNow();
       $("#sync-now-btn").disabled = false;
+    });
+
+    $("#reset-local-state-btn").addEventListener("click", async () => {
+      $("#reset-local-state-btn").disabled = true;
+      await resetLocalStateFromServer();
+      $("#reset-local-state-btn").disabled = false;
     });
 
     $("#force-resync-btn").addEventListener("click", async () => {
