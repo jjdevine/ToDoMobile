@@ -1485,8 +1485,17 @@
       generateTasksForAllProjects();
       renderHome();
       showScreen("home");
-      setSyncStatus("Local state reset and refreshed from server.");
-      showToast("Local state was reset and re-downloaded from server.");
+      setSyncStatus("Local state reset and refreshed from server. Running full-sync validation…");
+      showToast("Local state was reset and re-downloaded from server. Validating…");
+
+      const inSync = await validateFullState();
+      if (inSync) {
+        setSyncStatus("Local state reset — full sync verified.");
+        showToast("Reset complete. Full state verified in sync with server.");
+      } else {
+        setSyncStatus("Reset complete, but differences remain — see Validate full sync for details.");
+        showToast("Reset complete, but differences remain. Run 'Validate full sync' to review.");
+      }
     } catch (error) {
       console.error("Reset local state error:", error);
       showServerConnectionIssue(error, "local-state-reset");
@@ -2338,10 +2347,10 @@
       project.id
     );
 
-    const successMessage = 'All active tasks in "' + project.name + '" match the server.';
+    const successMessage = 'All active tasks in "' + project.name + '" match the server. (Active tasks only — use Validate full sync for a complete comparison.)';
     const statusText = issues.length
-      ? "Found " + issues.length + " validation issue" + (issues.length === 1 ? "" : "s") + "."
-      : "Everything is up to date.";
+      ? "Found " + issues.length + " active-task validation issue" + (issues.length === 1 ? "" : "s") + "."
+      : "Active tasks are up to date. (Active tasks only — use Validate full sync for a complete comparison.)";
     pendingValidationRemoteState = remoteState;
     pendingValidationIssues = issues.slice();
     pendingValidationMode = "current";
@@ -2352,7 +2361,7 @@
   async function validateVisibleProjectsState() {
     clearValidationActionState();
     const localVisibleProjects = getVisibleProjectsForState(appState);
-    const title = "Validate Projects";
+    const title = "Validate Active Tasks";
     showValidationModal(title, "Checking visible projects against the server…", "");
     refreshValidationActionButtons();
 
@@ -2426,15 +2435,194 @@
         compareProjectActiveTasks(localState.projects[projectId], normalizedRemoteState.projects[projectId], issues, projectId);
       });
 
-    const successMessage = "All visible projects and their active tasks match the server.";
+    const successMessage = "All visible projects and their active tasks match the server. (Active tasks only — use Validate full sync for a complete comparison.)";
     const statusText = issues.length
-      ? "Found " + issues.length + " validation issue" + (issues.length === 1 ? "" : "s") + "."
-      : "Everything is up to date.";
+      ? "Found " + issues.length + " active-task validation issue" + (issues.length === 1 ? "" : "s") + "."
+      : "Active tasks are up to date. (Active tasks only — use Validate full sync for a complete comparison.)";
     pendingValidationRemoteState = remoteState;
     pendingValidationIssues = issues.slice();
     pendingValidationMode = "visible";
     showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
     refreshValidationActionButtons();
+  }
+
+  // --- Full-state validation ---
+
+  async function fetchRemoteAuxState() {
+    if (!supabase || !currentUser) return null;
+    const userId = currentUser.id;
+    try {
+      const [configsRes, descriptionsRes] = await Promise.all([
+        supabase.schema("todo").from(PROJECTS_TABLE).select("id, config_text").eq("user_id", userId),
+        supabase.schema("todo").from(RECURRING_TASK_DESCRIPTIONS_TABLE).select("project_id, task_name, description").eq("user_id", userId),
+      ]);
+      if (configsRes.error) throw configsRes.error;
+      if (descriptionsRes.error) throw descriptionsRes.error;
+
+      const remoteConfigs = {};
+      (configsRes.data || []).forEach((row) => {
+        if (row.id) remoteConfigs[row.id] = typeof row.config_text === "string" ? row.config_text : "";
+      });
+
+      const remoteDescriptions = {};
+      (descriptionsRes.data || []).forEach((row) => {
+        if (row.project_id && typeof row.task_name === "string" && row.task_name) {
+          if (!remoteDescriptions[row.project_id]) remoteDescriptions[row.project_id] = {};
+          remoteDescriptions[row.project_id][row.task_name] = typeof row.description === "string" ? row.description : "";
+        }
+      });
+
+      return { remoteConfigs, remoteDescriptions };
+    } catch (error) {
+      console.error("fetchRemoteAuxState error:", error);
+      return null;
+    }
+  }
+
+  function canonicalJson(value) {
+    if (value === null || value === undefined) return "null";
+    if (typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonicalJson).join(",") + "]";
+    }
+    return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
+  }
+
+  function compareArchivedTasks(localProject, remoteProject, issues, projectId) {
+    const projectName = (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId;
+    const localArchived = (localProject && localProject.archived) || {};
+    const remoteArchived = (remoteProject && remoteProject.archived) || {};
+    const allIds = new Set(Object.keys(localArchived).concat(Object.keys(remoteArchived)));
+    Array.from(allIds).sort().forEach((taskId) => {
+      const local = localArchived[taskId];
+      const remote = remoteArchived[taskId];
+      const label = (local && local.name) || (remote && remote.name) || taskId;
+      if (!local && remote) {
+        pushValidationIssue(issues, "missingLocal", label, "Archived task exists on the server only.", projectName, {
+          kind: "task", projectId, taskId, archived: true,
+        });
+      } else if (local && !remote) {
+        pushValidationIssue(issues, "missingRemote", label, "Archived task exists on this device only.", projectName, {
+          kind: "task", projectId, taskId, archived: true,
+        });
+      } else {
+        const differences = describeTaskValidationMismatch(local, remote);
+        if (differences.length) {
+          pushValidationIssue(issues, "mismatch", label, "Archived task differs: " + differences.join("; ") + ".", projectName, {
+            kind: "task", projectId, taskId, archived: true,
+          });
+        }
+      }
+    });
+  }
+
+  function compareProjectConfigs(localConfigs, remoteConfigs, issues) {
+    const allIds = new Set(Object.keys(localConfigs).concat(Object.keys(remoteConfigs)));
+    Array.from(allIds).sort().forEach((projectId) => {
+      const local = (localConfigs[projectId] || "").trim();
+      const remote = (remoteConfigs[projectId] || "").trim();
+      if (local !== remote) {
+        pushValidationIssue(issues, "mismatch", "Config for project " + projectId, "Project config text differs.", "", {
+          kind: "project", projectId,
+        });
+      }
+    });
+  }
+
+  function compareRecurringDescriptions(localDescs, remoteDescs, issues) {
+    const allProjectIds = new Set(Object.keys(localDescs).concat(Object.keys(remoteDescs)));
+    Array.from(allProjectIds).sort().forEach((projectId) => {
+      const localByName = localDescs[projectId] || {};
+      const remoteByName = remoteDescs[projectId] || {};
+      const allNames = new Set(Object.keys(localByName).concat(Object.keys(remoteByName)));
+      Array.from(allNames).sort().forEach((taskName) => {
+        const local = typeof localByName[taskName] === "string" ? localByName[taskName] : "";
+        const remote = typeof remoteByName[taskName] === "string" ? remoteByName[taskName] : "";
+        if (local !== remote) {
+          pushValidationIssue(issues, "mismatch", 'Recurring description "' + taskName + '"',
+            'Recurring task description differs (project ' + projectId + ').',
+            "", { kind: "project", projectId });
+        }
+      });
+    });
+  }
+
+  async function validateFullState() {
+    clearValidationActionState();
+    const title = "Validate Full Sync";
+    showValidationModal(title, "Checking full local state against the server…", "");
+    refreshValidationActionButtons();
+
+    const { remoteState, issues } = await fetchValidationRemoteState();
+    if (!remoteState) {
+      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
+      refreshValidationActionButtons();
+      return false;
+    }
+
+    const remoteAux = await fetchRemoteAuxState();
+    if (!remoteAux) {
+      pushValidationIssue(issues, "unavailable", "Auxiliary state unavailable",
+        "Could not load project configs or recurring descriptions from server.", "", {});
+      showValidationModal(title, "Validation could not run (partial fetch).", buildValidationResultsHtml(issues, "", false));
+      refreshValidationActionButtons();
+      return false;
+    }
+
+    const localNorm = normalizeState(appState);
+    const remoteNorm = normalizeState(remoteState);
+
+    // Compare all projects (including hidden/inactive) by iterating both sides.
+    const allProjectIds = new Set(
+      Object.keys(localNorm.projects).concat(Object.keys(remoteNorm.projects))
+    );
+
+    Array.from(allProjectIds).sort((a, b) => {
+      const la = (localNorm.projects[a] && localNorm.projects[a].name) || (remoteNorm.projects[a] && remoteNorm.projects[a].name) || a;
+      const lb = (localNorm.projects[b] && localNorm.projects[b].name) || (remoteNorm.projects[b] && remoteNorm.projects[b].name) || b;
+      return String(la).localeCompare(String(lb));
+    }).forEach((projectId) => {
+      const localProject = localNorm.projects[projectId];
+      const remoteProject = remoteNorm.projects[projectId];
+      // Active tasks (all projects, not just visible)
+      compareProjectActiveTasks(localProject, remoteProject, issues, projectId);
+      // Archived tasks
+      compareArchivedTasks(localProject, remoteProject, issues, projectId);
+    });
+
+    // Compare deleted projects tombstones
+    const allDeletedIds = new Set(
+      Object.keys(localNorm.deletedProjects || {}).concat(Object.keys(remoteNorm.deletedProjects || {}))
+    );
+    Array.from(allDeletedIds).sort().forEach((projectId) => {
+      const local = (localNorm.deletedProjects || {})[projectId];
+      const remote = (remoteNorm.deletedProjects || {})[projectId];
+      if (!local && remote) {
+        pushValidationIssue(issues, "missingLocal", "Deleted project " + projectId,
+          "Project tombstone exists on the server only.", "", { kind: "project", projectId });
+      } else if (local && !remote) {
+        pushValidationIssue(issues, "missingRemote", "Deleted project " + projectId,
+          "Project tombstone exists on this device only.", "", { kind: "project", projectId });
+      }
+    });
+
+    // Compare project configs
+    compareProjectConfigs(projectConfigTexts, remoteAux.remoteConfigs, issues);
+
+    // Compare recurring task descriptions
+    compareRecurringDescriptions(recurringTaskDescriptions, remoteAux.remoteDescriptions, issues);
+
+    const successMessage = "Full state matches the server — all projects, archived tasks, configs and recurring descriptions are in sync.";
+    const statusText = issues.length
+      ? "Found " + issues.length + " full-sync difference" + (issues.length === 1 ? "" : "s") + "."
+      : "Everything is in sync.";
+
+    pendingValidationRemoteState = remoteState;
+    pendingValidationIssues = issues.slice();
+    pendingValidationMode = "visible";
+    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
+    refreshValidationActionButtons();
+    return issues.length === 0;
   }
 
   async function openResyncModal() {
@@ -3875,7 +4063,7 @@
       if (!button) return;
       button.disabled = !project;
       button.title = project
-        ? "Compare this project's active tasks with the server."
+        ? "Compare this project's active tasks with the server. (Active tasks only — use Validate full sync for archived tasks and configs.)"
         : "Open a project to validate it.";
     });
 
@@ -3884,8 +4072,14 @@
     const visibleProjects = getVisibleProjectsForState(appState);
     homeButton.disabled = visibleProjects.length === 0;
     homeButton.title = visibleProjects.length
-      ? "Compare every visible project and its active tasks with the server."
+      ? "Compare every visible project's active tasks with the server."
       : "Create or unhide a project to validate it.";
+
+    const fullSyncButton = $("#validate-full-sync-btn");
+    if (fullSyncButton) {
+      fullSyncButton.disabled = false;
+      fullSyncButton.title = "Compare all projects, archived tasks, project configs and recurring descriptions with the server.";
+    }
   }
 
   function ensureProjectTaskViewCardsContainer() {
@@ -6335,6 +6529,7 @@
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
     $("#validate-projects-btn").addEventListener("click", validateVisibleProjectsState);
+    $("#validate-full-sync-btn").addEventListener("click", validateFullState);
     $("#toggle-project-actions-btn").addEventListener("click", () => {
       showProjectActions = !showProjectActions;
       renderHome();
