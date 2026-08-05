@@ -697,6 +697,19 @@
     saveLastSyncTime(null);
   }
 
+  function clearAllLocalPersistence() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(PROJECT_CONFIGS_STORAGE_KEY);
+      localStorage.removeItem(HIDDEN_PROJECTS_STORAGE_KEY);
+      localStorage.removeItem(PROJECT_TAG_FILTERS_STORAGE_KEY);
+      localStorage.removeItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
+      localStorage.removeItem(LAST_SYNC_TIME_STORAGE_KEY);
+    } catch (error) {
+      console.warn("Failed to clear local persistence:", error);
+    }
+  }
+
   async function ensureFreshRemoteStateBeforePush(forcePull) {
     if (!supabase || !currentUser) return false;
     const shouldPull = !!forcePull || requiresFreshPullBeforePush || !lastPullAt;
@@ -1465,11 +1478,7 @@
       showHiddenProjects = false;
       currentProjectId = null;
       resetSyncTracking();
-      saveStateLocal();
-      saveLocalProjectConfigs();
-      saveLocalRecurringTaskDescriptions();
-      saveHiddenProjects();
-      saveProjectTagFilters();
+      clearAllLocalPersistence();
 
       appState = normalizeState(remoteState);
       saveStateLocal();
@@ -1483,19 +1492,9 @@
       await fetchAllRecurringTaskDescriptionsFromDb();
       rebuildProjectConfigs();
       generateTasksForAllProjects();
-      renderHome();
-      showScreen("home");
-      setSyncStatus("Local state reset and refreshed from server. Running full-sync validation…");
-      showToast("Local state was reset and re-downloaded from server. Validating…");
-
-      const inSync = await validateFullState();
-      if (inSync) {
-        setSyncStatus("Local state reset — full sync verified.");
-        showToast("Reset complete. Full state verified in sync with server.");
-      } else {
-        setSyncStatus("Reset complete, but differences remain — see Validate full sync for details.");
-        showToast("Reset complete, but differences remain. Run 'Validate full sync' to review.");
-      }
+      setSyncStatus("Local state reset. Reloading from fresh server-backed state…");
+      showToast("Local state cleared. Reloading fresh state from the server…");
+      window.location.reload();
     } catch (error) {
       console.error("Reset local state error:", error);
       showServerConnectionIssue(error, "local-state-reset");
