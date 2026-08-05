@@ -102,6 +102,7 @@
   let showProjectActions = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
+  let lastPullErrorMessage = "";
   let appMode = "loading";
   let serverCommandInFlight = false;
 
@@ -652,11 +653,13 @@
       // Server is the source of truth: always use server state directly.
       appState = normalizeState(remoteState);
       appMode = "online";
+      lastPullErrorMessage = "";
       saveStateLocal();
       lastPullAt = Date.now();
       return true;
     } catch (error) {
       console.error("Sync pull error:", error.message || error);
+      lastPullErrorMessage = getErrorMessage(error);
       if (isServerConnectionError(error)) appMode = "offline-readonly";
       showServerConnectionIssue(error, "sync-pull");
       return false;
@@ -4468,11 +4471,18 @@
       recurringTaskDescriptions = {};
       await fetchAllProjectConfigsFromDb();
       await fetchAllRecurringTaskDescriptionsFromDb();
-    } else {
+    } else if (!hasNetworkConnection() || appMode === "offline-readonly") {
       appMode = "offline-readonly";
       loadLocalState();
       loadLocalProjectConfigs();
       loadLocalRecurringTaskDescriptions();
+    } else {
+      appState = createEmptyState();
+      projectConfigTexts = {};
+      recurringTaskDescriptions = {};
+      setSyncStatus("Could not load current server data.");
+      const detail = getUserFacingServerError(lastPullErrorMessage);
+      showToast(detail ? `Could not load current server data: ${detail}` : "Could not load current server data.");
     }
     rebuildProjectConfigs();
 

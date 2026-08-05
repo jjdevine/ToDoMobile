@@ -172,7 +172,16 @@ begin
         coalesce(candidate.body, ''),
         now(),
         now()
-      );
+      )
+      on conflict (user_id, project_id, id) do update
+      set name = excluded.name,
+          due_date = excluded.due_date,
+          source = excluded.source,
+          generated_key = excluded.generated_key,
+          pinned = excluded.pinned,
+          end_of_day = excluded.end_of_day,
+          body = excluded.body,
+          updated_at = now();
       created_count := created_count + 1;
     end if;
   end loop;
