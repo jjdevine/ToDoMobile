@@ -117,8 +117,6 @@
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
   let forcedOfflineStartup = false;
-  let serverUpdatesDisabled = false;
-  let staleUpdateResolver = null;
 
   function nowIso() {
     return new Date().toISOString();
@@ -664,6 +662,12 @@
   async function persistState() {
     clearTimeout(saveTimer);
     saveTimer = null;
+
+    if (!isOnline()) {
+      setSyncStatus("Offline — changes are not saved.");
+      return;
+    }
+
     saveStateLocal();
 
     if (currentUser) {
@@ -671,7 +675,7 @@
       if (pushed) {
         setSyncStatus("Saved and synced.");
       } else {
-        setSyncStatus("Saved locally. Cloud sync will retry later.");
+        setSyncStatus("Cloud sync failed.");
       }
       return;
     }
@@ -692,7 +696,6 @@
   function resetSyncTracking() {
     lastPullAt = 0;
     lastPulledRemoteStateUpdatedAt = null;
-    serverUpdatesDisabled = false;
     requiresFreshPullBeforePush = true;
     saveLastSyncTime(null);
   }
@@ -1175,61 +1178,15 @@
 
   async function pushStateGuarded(options) {
     if (!supabase || !currentUser) return false;
-    if (serverUpdatesDisabled) return false;
-    // Prevent concurrent pushes from each opening their own stale-update modal.
-    if (staleUpdateResolver) return false;
 
     const forcePull = !!(options && options.forcePull);
-
-    // Stale update gate: check if server has been updated since our last known sync.
-    // This protects against stale tabs overwriting changes made on other devices.
-    // Skip when forcePull is set: the caller has already handled staleness (e.g. confirmResync).
-    if (lastPulledRemoteStateUpdatedAt && !forcePull) {
-      try {
-        const remoteMarker = await fetchRemoteSyncMarker();
-        if (remoteMarker && compareIso(remoteMarker, lastPulledRemoteStateUpdatedAt) > 0) {
-          const choice = await openStaleUpdateModal(remoteMarker);
-          if (choice === "cancel") {
-            return false;
-          }
-          if (choice === "reset") {
-            const pulled = await pullState();
-            if (pulled) {
-              generateTasksForAllProjects();
-              renderCurrentScreen();
-              setSyncStatus("Reset to server. Local state is now up to date.");
-            }
-            return false;
-          }
-          if (choice === "disable") {
-            serverUpdatesDisabled = true;
-            setSyncStatus("Server updates disabled. Changes are saved locally only.");
-            return false;
-          }
-          if (choice === "review") {
-            // Open the resync modal so the user can inspect local vs remote differences
-            // before deciding what to do. The push is abandoned for now; the user can
-            // trigger "Sync both sides" from the resync modal to proceed.
-            await openResyncModal();
-            return false;
-          }
-          // choice === "push": fall through to normal pull-then-push flow
-        }
-      } catch (error) {
-        console.error("Sync drift check error:", error.message || error);
-        showServerConnectionIssue(error, "sync-drift-check");
-        return false;
-      }
-    }
 
     const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
     if (!pulledBeforePush) return false;
 
     const pushed = await pushState();
     if (pushed) {
-      // Post-push pull: refresh local sync marker to reflect the server state we just
-      // wrote. This prevents false stale-update warnings on subsequent pushes from the
-      // same device by keeping lastPulledRemoteStateUpdatedAt current.
+      // Post-push pull: refresh local state to exactly match what we wrote to the server.
       await pullState();
     }
     return pushed;
@@ -1403,7 +1360,8 @@
     try {
       const remoteState = await fetchNormalizedRemoteState();
       if (!remoteState) return false;
-      appState = mergeStates(appState, remoteState);
+      // Server is the source of truth: always use server state directly.
+      appState = normalizeState(remoteState);
       saveStateLocal();
       lastPullAt = Date.now();
       lastPulledRemoteStateUpdatedAt =
@@ -3503,9 +3461,35 @@
     }, TOAST_DISPLAY_MS);
   }
 
+  function isOnline() {
+    return typeof navigator !== "undefined" ? navigator.onLine !== false : true;
+  }
+
   function isOfflineModeExpected() {
     if (!currentUser || !supabase) return true;
-    return typeof navigator !== "undefined" && navigator.onLine === false;
+    return !isOnline();
+  }
+
+  /**
+   * Guards mutating operations when offline.
+   * Returns true if the app is currently offline (caller should abort).
+   */
+  function guardOffline() {
+    if (!isOnline()) {
+      showToast("You are offline. Edits are unavailable until you reconnect.");
+      return true;
+    }
+    return false;
+  }
+
+  function updateOfflineBanner() {
+    const banner = $("#offline-banner");
+    if (!banner) return;
+    if (!isOnline()) {
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
   }
 
   function getErrorMessage(error) {
@@ -3634,7 +3618,11 @@
     if (currentUser) {
       $("#user-email").textContent = currentUser.email;
       $("#user-bar").classList.remove("hidden");
-      setSyncStatus("Signed in. Changes save after 2 seconds.");
+      if (!isOnline()) {
+        setSyncStatus("Offline — read-only mode. Reconnect to make changes.");
+      } else {
+        setSyncStatus("Signed in. Changes sync to server.");
+      }
       return;
     }
 
@@ -3756,6 +3744,7 @@
     const projectGrid = $("#project-grid");
     const emptyState = $("#home-empty");
     projectGrid.innerHTML = "";
+    const offline = !isOnline();
     const allVisibleProjects = getAllProjects();
     renderHomeTagFilters(allVisibleProjects);
     const projects = getTagFilteredProjects(allVisibleProjects, selectedProjectTagFilters);
@@ -3774,11 +3763,13 @@
     const generateAllBtn = $("#generate-all-btn");
     if (generateAllBtn) {
       generateAllBtn.classList.toggle("hidden", !showProjectActions);
+      generateAllBtn.disabled = offline;
     }
 
     const createProjectBtn = $("#open-create-project-btn");
     if (createProjectBtn) {
       createProjectBtn.classList.toggle("hidden", !showProjectActions);
+      createProjectBtn.disabled = offline;
     }
 
     const downloadAllArchivesBtn = $("#download-all-archives-btn");
@@ -3789,6 +3780,7 @@
     const homeAddTaskBtn = $("#open-home-add-task-btn");
     if (homeAddTaskBtn) {
       homeAddTaskBtn.classList.toggle("hidden", !showProjectActions || projects.length === 0);
+      homeAddTaskBtn.disabled = offline;
     }
 
     const showHiddenBtn = $("#show-hidden-projects-btn");
@@ -3841,6 +3833,7 @@
       defaultButton.className = isDefault ? "project-card-default-btn project-card-default-btn-active" : "project-card-default-btn";
       defaultButton.textContent = isDefault ? "★ Default" : "☆ Set default";
       defaultButton.title = isDefault ? "This is your default project. Click to clear." : "Open this project's today view on app start.";
+      defaultButton.disabled = offline;
       defaultButton.addEventListener("click", (event) => {
         event.stopPropagation();
         if (isDefault) {
@@ -3855,6 +3848,7 @@
       deleteButton.type = "button";
       deleteButton.className = "project-card-delete";
       deleteButton.textContent = "Delete";
+      deleteButton.disabled = offline;
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
         deleteProject(project.id);
@@ -3866,6 +3860,7 @@
       tagsButton.className = "project-card-tags";
       tagsButton.textContent = "Tags";
       tagsButton.title = "Edit project tags";
+      tagsButton.disabled = offline;
       tagsButton.addEventListener("click", (event) => {
         event.stopPropagation();
         promptEditProjectTags(project.id);
@@ -3899,6 +3894,7 @@
         inactiveButton.type = "button";
         inactiveButton.className = "project-card-inactive";
         inactiveButton.textContent = "Make inactive";
+        inactiveButton.disabled = offline;
         inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
         inactiveButton.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -3947,6 +3943,7 @@
   function deleteProject(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
+    if (guardOffline()) return;
 
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
@@ -3978,6 +3975,7 @@
   function makeProjectInactive(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
+    if (guardOffline()) return;
 
     const projectState = ensureProjectState(projectId, "");
     projectState.inactive = true;
@@ -3993,6 +3991,7 @@
   }
 
   function reactivateProject(projectId) {
+    if (guardOffline()) return;
     const projectState = ensureProjectState(projectId, "");
     projectState.inactive = false;
     touchProject(projectState);
@@ -4015,6 +4014,7 @@
   }
 
   function setDefaultProject(projectId) {
+    if (guardOffline()) return;
     const timestamp = nowIso();
     appState.defaultProjectId = projectId;
     appState.defaultProjectUpdatedAt = timestamp;
@@ -4024,6 +4024,7 @@
   }
 
   function clearDefaultProject() {
+    if (guardOffline()) return;
     const timestamp = nowIso();
     appState.defaultProjectId = null;
     appState.defaultProjectUpdatedAt = timestamp;
@@ -4068,6 +4069,30 @@
       fullSyncButton.disabled = false;
       fullSyncButton.title = "Compare all projects, archived tasks, project configs and recurring descriptions with the server.";
     }
+  }
+
+  function updateMutationButtonsForOffline() {
+    const offline = !isOnline();
+    const mutationSelectors = [
+      "#open-project-add-task-btn",
+      "#open-day-add-task-btn",
+      "#open-project-configure-btn",
+      "#delete-archive-btn",
+      "#refresh-project-btn",
+      "#refresh-day-project-btn",
+    ];
+    mutationSelectors.forEach((sel) => {
+      const btn = $(sel);
+      if (!btn) return;
+      // Only set disabled; the visible state (hidden) is managed elsewhere.
+      if (offline) {
+        btn.dataset.offlineDisabled = "1";
+        btn.disabled = true;
+      } else if (btn.dataset.offlineDisabled === "1") {
+        delete btn.dataset.offlineDisabled;
+        btn.disabled = false;
+      }
+    });
   }
 
   function ensureProjectTaskViewCardsContainer() {
@@ -4349,10 +4374,12 @@
         .filter((task) => !getPendingTaskCompletion(currentProjectId, task.id))
         .length;
       if (overdueCount > 0) {
+        const offline = !isOnline();
         const deferAllButton = document.createElement("button");
         deferAllButton.type = "button";
         deferAllButton.className = "btn-secondary";
         deferAllButton.textContent = "Defer all overdue to today";
+        deferAllButton.disabled = offline;
         deferAllButton.addEventListener("click", deferAllOverdueTasksToToday);
         controls.appendChild(deferAllButton);
 
@@ -4360,6 +4387,7 @@
         completeAllButton.type = "button";
         completeAllButton.className = "btn-danger";
         completeAllButton.textContent = "Complete all overdue";
+        completeAllButton.disabled = offline;
         completeAllButton.addEventListener("click", completeAllOverdueTasks);
         controls.appendChild(completeAllButton);
       }
@@ -4419,6 +4447,7 @@
 
   function buildTaskCard(task, options) {
     const card = document.createElement("div");
+    const offline = !isOnline();
     card.className = "task-card";
     if (options.overdue) card.classList.add("overdue");
     if (!task.dueDate) card.classList.add("nodate");
@@ -4476,11 +4505,13 @@
         }
         completeTask(task.id);
       });
+      completeButton.disabled = offline;
 
       const deferButton = document.createElement("button");
       deferButton.type = "button";
       deferButton.className = "task-btn defer";
       deferButton.textContent = task.dueDate ? "Defer" : "Schedule";
+      deferButton.disabled = offline;
       deferButton.addEventListener("click", () => {
         openDeferModal(task.id);
       });
@@ -4489,6 +4520,7 @@
       pinButton.type = "button";
       pinButton.className = "task-btn pin";
       pinButton.textContent = task.pinned ? "Unpin" : "Pin";
+      pinButton.disabled = offline;
       pinButton.addEventListener("click", () => {
         togglePinTask(task.id);
       });
@@ -4497,6 +4529,7 @@
       endOfDayButton.type = "button";
       endOfDayButton.className = "task-btn end-of-day";
       endOfDayButton.textContent = task.endOfDay ? "Remove End of Day" : "End of Day";
+      endOfDayButton.disabled = offline;
       endOfDayButton.addEventListener("click", () => {
         toggleEndOfDayTask(task.id);
       });
@@ -4535,6 +4568,7 @@
       deleteButton.type = "button";
       deleteButton.className = "task-btn delete";
       deleteButton.textContent = "Delete";
+      deleteButton.disabled = offline;
       deleteButton.addEventListener("click", () => {
         deleteArchivedTask(task.id);
       });
@@ -4556,6 +4590,7 @@
       completeButton.type = "button";
       completeButton.className = "task-btn complete";
       completeButton.textContent = "Complete";
+      completeButton.disabled = offline;
       completeButton.addEventListener("click", () => {
         completeTask(task.id);
       });
@@ -4564,6 +4599,7 @@
       deferButton.type = "button";
       deferButton.className = "task-btn defer";
       deferButton.textContent = task.dueDate ? "Defer" : "Schedule";
+      deferButton.disabled = offline;
       deferButton.addEventListener("click", () => {
         openDeferModal(task.id);
       });
@@ -4572,6 +4608,7 @@
       editButton.type = "button";
       editButton.className = "task-btn edit";
       editButton.textContent = "Edit";
+      editButton.disabled = offline;
       editButton.addEventListener("click", () => {
         openEditModal(task.id);
       });
@@ -4580,6 +4617,7 @@
       deleteButton.type = "button";
       deleteButton.className = "task-btn delete";
       deleteButton.textContent = "Delete";
+      deleteButton.disabled = offline;
       deleteButton.addEventListener("click", () => {
         hardDeleteTask(task.id);
       });
@@ -4593,6 +4631,7 @@
       pinButton.type = "button";
       pinButton.className = "task-btn pin";
       pinButton.textContent = task.pinned ? "Unpin" : "Pin";
+      pinButton.disabled = offline;
       pinButton.addEventListener("click", () => {
         togglePinTask(task.id);
       });
@@ -4602,6 +4641,7 @@
       endOfDayButton.type = "button";
       endOfDayButton.className = "task-btn end-of-day";
       endOfDayButton.textContent = task.endOfDay ? "Remove End of Day" : "End of Day";
+      endOfDayButton.disabled = offline;
       endOfDayButton.addEventListener("click", () => {
         toggleEndOfDayTask(task.id);
       });
@@ -4806,6 +4846,7 @@
     renderSummary(project.id);
     updateRefreshButtons(project);
     updateValidationButtons(project);
+    updateMutationButtonsForOffline();
     showScreen("project");
   }
 
@@ -4846,6 +4887,7 @@
     renderTaskSections(project.id);
     updateRefreshButtons(project);
     updateValidationButtons(project);
+    updateMutationButtonsForOffline();
     showScreen("day");
   }
 
@@ -4870,6 +4912,7 @@
       archived: true,
       emptyMessage: "No archived tasks yet.",
     }));
+    updateMutationButtonsForOffline();
   }
 
   function renderCurrentScreen() {
@@ -4968,6 +5011,7 @@
       reactivateButton.className = "btn-secondary project-card-reactivate";
       reactivateButton.textContent = "Reactivate";
       reactivateButton.title = "Show this project on the home screen and resume recurring task generation.";
+      reactivateButton.disabled = !isOnline();
       reactivateButton.addEventListener("click", () => {
         reactivateProject(project.id);
       });
@@ -4998,6 +5042,7 @@
   }
 
   function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
+    if (guardOffline()) return false;
     const select = $("#add-task-project-select");
     const targetProjectId = (select && select.value) ? select.value : currentProjectId;
     if (!targetProjectId) return false;
@@ -5110,6 +5155,7 @@
   function promptEditProjectTags(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
+    if (guardOffline()) return;
     const initialValue = formatProjectTags(project.tags);
     const entered = prompt('Edit tags for "' + project.name + '" (comma separated):', initialValue);
     if (entered === null) return;
@@ -5209,6 +5255,7 @@
 
   function createManualProject(event) {
     event.preventDefault();
+    if (guardOffline()) return;
 
     const nameInput = $("#create-project-name-input");
     const tagsInput = $("#create-project-tags-input");
@@ -5492,6 +5539,7 @@
   async function saveProjectConfig(event) {
     event.preventDefault();
     if (!configModalProjectId) return;
+    if (guardOffline()) return;
 
     const textarea = $("#config-modal-textarea");
     const errorEl = $("#config-modal-error");
@@ -5532,6 +5580,7 @@
 
   async function clearProjectConfig() {
     if (!configModalProjectId) return;
+    if (guardOffline()) return;
     if (!confirm("Clear the recurring configuration for this project? Existing generated tasks will remain but no new ones will be created.")) return;
 
     const projectId = configModalProjectId;
@@ -5603,6 +5652,7 @@
   function handleAddRecurringTaskDescription() {
     const projectId = configModalProjectId;
     if (!projectId) return;
+    if (guardOffline()) return;
 
     const nameInput = $("#rtd-task-name-input");
     const descInput = $("#rtd-description-input");
@@ -5635,6 +5685,7 @@
 
   function handleDeleteRecurringTaskDescription(projectId, taskName) {
     if (!projectId || !taskName) return;
+    if (guardOffline()) return;
     if (recurringTaskDescriptions[projectId]) {
       delete recurringTaskDescriptions[projectId][taskName];
       if (!Object.keys(recurringTaskDescriptions[projectId]).length) {
@@ -5648,6 +5699,7 @@
 
   function completeTask(taskId) {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[taskId];
     if (!task) return;
@@ -5688,6 +5740,7 @@
 
   function completeAllOverdueTasks() {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectId = currentProjectId;
     const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
       .map((task) => task.id)
@@ -5715,6 +5768,7 @@
 
   function deferAllOverdueTasksToToday() {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectId = currentProjectId;
     const today = todayKey();
     const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
@@ -5849,6 +5903,7 @@
   function saveEditedTask(event) {
     event.preventDefault();
     if (!currentProjectId || !editTaskId) return;
+    if (guardOffline()) return;
 
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[editTaskId];
@@ -5924,6 +5979,7 @@
 
   function deferToDate(dateKey) {
     if (!currentProjectId || !deferTaskId) return;
+    if (guardOffline()) { closeDeferModal(); return; }
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[deferTaskId];
     if (!task) {
@@ -5942,6 +5998,7 @@
 
   function clearDeferDate() {
     if (!currentProjectId || !deferTaskId) return;
+    if (guardOffline()) { closeDeferModal(); return; }
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[deferTaskId];
     if (!task) {
@@ -5960,6 +6017,7 @@
 
   function togglePinTask(taskId) {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[taskId];
     if (!task) return;
@@ -5975,6 +6033,7 @@
 
   function toggleEndOfDayTask(taskId) {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[taskId];
     if (!task) return;
@@ -5990,6 +6049,7 @@
 
   function hardDeleteTask(taskId) {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.tasks[taskId];
     if (!task) return;
@@ -6010,6 +6070,7 @@
 
   function deleteArchivedTask(taskId) {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const task = projectState.archived[taskId];
     if (!task) return;
@@ -6030,6 +6091,7 @@
 
   function clearArchive() {
     if (!currentProjectId) return;
+    if (guardOffline()) return;
     const projectState = ensureProjectState(currentProjectId, "");
     const archiveIds = Object.keys(projectState.archived);
     if (!archiveIds.length) return;
@@ -6403,6 +6465,7 @@
   }
 
   function deleteAllArchivedTasks() {
+    if (guardOffline()) return;
     const allProjects = [...getAllProjects(), ...getInactiveProjects()];
     const projectArchives = allProjects.map((project) => ({
       project,
@@ -6725,6 +6788,28 @@
     window.addEventListener("focus", markRemoteStateStale);
 
     window.addEventListener("beforeunload", flushLocalState);
+
+    window.addEventListener("offline", () => {
+      updateOfflineBanner();
+      renderCurrentScreen();
+      setSyncStatus("You are offline. Read-only mode until reconnected.");
+    });
+
+    window.addEventListener("online", async () => {
+      updateOfflineBanner();
+      setSyncStatus("Back online. Refreshing from server…");
+      if (currentUser && appEntered) {
+        const pulled = await pullState();
+        if (pulled) {
+          generateTasksForAllProjects();
+          renderCurrentScreen();
+          setSyncStatus("Refreshed from server.");
+        } else {
+          renderCurrentScreen();
+          setSyncStatus("Could not refresh from server.");
+        }
+      }
+    });
   }
 
   async function enterApp() {
@@ -6757,6 +6842,7 @@
     const generation = generateTasksForAllProjects();
 
     showUserBar();
+    updateOfflineBanner();
 
     const defaultId = appState.defaultProjectId;
     if (defaultId && getProjectMeta(defaultId) && !hiddenProjectIds.has(defaultId)) {
