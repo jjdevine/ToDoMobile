@@ -138,7 +138,7 @@ begin
       p_project_id,
       candidate.generated_key,
       candidate.id,
-      candidate.due_date,
+      nullif(candidate.due_date, '')::date,
       candidate.name,
       now()
     )
@@ -164,7 +164,7 @@ begin
         p_project_id,
         candidate.id,
         candidate.name,
-        candidate.due_date,
+        nullif(candidate.due_date, '')::date,
         'generated',
         candidate.generated_key,
         false,
@@ -178,7 +178,7 @@ begin
   end loop;
 
   update todo.projects
-  set last_generated_through = p_generated_through
+  set last_generated_through = nullif(p_generated_through, '')::date
   where user_id = auth.uid()
     and id = p_project_id;
 
