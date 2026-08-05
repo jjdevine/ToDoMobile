@@ -2357,7 +2357,7 @@
         completeButton.setAttribute("aria-label", "Review description before completing task");
       }
       completeButton.addEventListener("click", () => {
-        if (pendingCountdownLabel) {
+        if (getPendingTaskCompletion(task.id)) {
           cancelPendingTaskCompletion(task.id);
           return;
         }
@@ -2447,10 +2447,6 @@
       completeButton.textContent = pendingCountdownLabel || "Complete";
       completeButton.disabled = offline;
       completeButton.addEventListener("click", () => {
-        if (pendingCountdownLabel) {
-          cancelPendingTaskCompletion(task.id);
-          return;
-        }
         completeTask(task.id);
       });
 
