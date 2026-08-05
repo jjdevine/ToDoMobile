@@ -24,7 +24,6 @@
         <div class="splash-dots">
           <span></span><span></span><span></span>
         </div>
-        <button id="force-offline-mode-btn" type="button" class="btn-secondary splash-offline-action">Continue in offline mode</button>
       </div>
     </div>
 
@@ -44,7 +43,6 @@
           <button type="submit" id="auth-submit-btn" class="btn-primary auth-submit">Sign In</button>
           <p id="auth-error" class="auth-error hidden"></p>
         </form>
-        <button id="skip-auth-btn" class="btn-text auth-skip">Continue without signing in</button>
       </div>
     </div>
 
@@ -54,9 +52,7 @@
         <p class="subtitle">Projects with recurring tasks and manual tasks</p>
         <div id="user-bar" class="user-bar hidden">
           <span id="user-email" class="user-email"></span>
-          <button id="sync-now-btn" class="btn-sync" title="Sync now">&#x21BB;</button>
-          <button id="force-resync-btn" class="btn-sync" title="Compare &amp; resync">&#x21C4;</button>
-          <button id="reset-local-state-btn" class="btn-danger" title="Wipe local state and download from server">Reset local state</button>
+          <button id="sync-now-btn" class="btn-sync" title="Refresh from server">&#x21BB;</button>
           <button id="logout-btn" class="btn-text">Sign out</button>
         </div>
         <p id="sync-status" class="sync-status">Local-only mode</p>
@@ -64,14 +60,11 @@
 
       <div class="toolbar-row">
         <button id="toggle-project-actions-btn" type="button" class="btn-secondary" aria-expanded="false">Show Project Actions</button>
-        <button id="validate-projects-btn" type="button" class="btn-secondary">Validate active tasks</button>
-        <button id="validate-full-sync-btn" type="button" class="btn-secondary">Validate full sync</button>
         <button id="download-persistence-backup-btn" type="button" class="btn-secondary">Download backup CSVs</button>
         <button id="generate-all-btn" class="btn-primary hidden">Generate tasks now</button>
         <button id="open-create-project-btn" type="button" class="btn-secondary hidden" aria-controls="create-project-panel" aria-expanded="false">Create project</button>
         <button id="open-home-add-task-btn" type="button" class="btn-secondary hidden">Add task</button>
         <button id="view-inactive-btn" type="button" class="btn-secondary hidden">Inactive projects</button>
-        <button id="show-hidden-projects-btn" type="button" class="btn-secondary hidden">Show hidden projects</button>
         <button id="download-all-archives-btn" type="button" class="btn-secondary hidden">Download all archived tasks</button>
         <button id="delete-all-archives-btn" type="button" class="btn-danger hidden" disabled>Delete all archived tasks</button>
       </div>
@@ -121,7 +114,6 @@
         <button id="open-project-add-task-btn" class="btn-secondary">Add task</button>
         <button id="open-project-configure-btn" class="btn-secondary">Configure</button>
         <button id="refresh-project-btn" class="btn-primary">Refresh tasks</button>
-        <button id="validate-project-btn" class="btn-secondary">Validate</button>
       </div>
 
       <div id="project-task-view-cards" class="project-task-view-cards"></div>
@@ -151,7 +143,6 @@
       <div class="project-actions">
         <button id="open-day-add-task-btn" class="btn-primary">Add task</button>
         <button id="refresh-day-project-btn" class="btn-primary">Refresh tasks</button>
-        <button id="validate-day-project-btn" class="btn-secondary">Validate</button>
         <button id="download-active-btn" class="btn-secondary">Download active</button>
         <button id="view-archive-btn" class="btn-secondary">View archive</button>
       </div>
@@ -196,9 +187,9 @@
 
   <div id="build-version" class="build-version"></div>
 
-  <div id="defer-modal" class="modal hidden" aria-hidden="true">
+  <div id="defer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="defer-modal-title" aria-hidden="true">
     <div class="modal-card">
-      <h3>Defer Task</h3>
+      <h3 id="defer-modal-title">Defer Task</h3>
       <p id="defer-task-name" class="modal-text"></p>
       <div id="defer-date-buttons" class="defer-date-buttons"></div>
       <div class="modal-actions">
@@ -208,12 +199,15 @@
     </div>
   </div>
 
-  <div id="edit-modal" class="modal hidden" aria-hidden="true">
+  <div id="edit-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" aria-hidden="true">
     <div class="modal-card">
-      <h3>Edit Task</h3>
+      <h3 id="edit-modal-title">Edit Task</h3>
       <form id="edit-task-form" class="task-form">
+        <label for="edit-task-name-input" class="modal-label">Task name</label>
         <input type="text" id="edit-task-name-input" placeholder="Task name" required maxlength="120">
+        <label for="edit-task-description-input" class="modal-label">Description</label>
         <textarea id="edit-task-description-input" placeholder="Description (optional)" rows="6"></textarea>
+        <label for="edit-task-date-input" class="modal-label">Due date</label>
         <input type="date" id="edit-task-date-input">
         <div class="date-quick-actions">
           <button type="button" class="date-quick-btn" data-target="edit-task-date-input" data-action="clear">No Due Date</button>
@@ -229,60 +223,20 @@
     </div>
   </div>
 
-  <div id="resync-modal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card modal-card-wide">
-      <div class="resync-modal-body">
-        <h3>Compare &amp; Resync</h3>
-        <p id="resync-status-text" class="modal-text"></p>
-        <div id="resync-diff" class="resync-diff"></div>
-      </div>
-      <div class="modal-actions resync-modal-actions">
-        <button id="cancel-resync-btn" type="button" class="btn-secondary">Cancel</button>
-        <button id="pull-remote-resync-btn" type="button" class="btn-secondary hidden">Pull remote (replace local)</button>
-        <button id="confirm-resync-btn" type="button" class="btn-primary hidden">Sync both sides</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="stale-update-modal" class="modal hidden" aria-hidden="true">
+  <div id="add-task-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="add-task-modal-title" aria-hidden="true">
     <div class="modal-card">
-      <h3>&#9888; Server Updated</h3>
-      <p id="stale-update-text" class="modal-text"></p>
-      <div class="modal-actions stale-update-modal-actions">
-        <button id="stale-push-btn" type="button" class="btn-primary">Push my changes</button>
-        <button id="stale-reset-btn" type="button" class="btn-secondary">Reset to server</button>
-        <button id="stale-review-btn" type="button" class="btn-secondary">Review differences</button>
-        <button id="stale-disable-btn" type="button" class="btn-danger">Disable server updates</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="validation-modal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card modal-card-wide">
-      <div class="resync-modal-body">
-        <h3 id="validation-title-text">Validate</h3>
-        <p id="validation-status-text" class="modal-text"></p>
-        <div id="validation-results" class="resync-diff"></div>
-      </div>
-      <div class="modal-actions resync-modal-actions validation-modal-actions">
-        <button id="validation-match-local-all-btn" type="button" class="btn-secondary hidden">Match local to server (all)</button>
-        <button id="validation-update-server-all-btn" type="button" class="btn-secondary hidden">Update server from local (all)</button>
-        <button id="close-validation-btn" type="button" class="btn-primary">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="add-task-modal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card">
-      <h3>Add Task</h3>
+      <h3 id="add-task-modal-title">Add Task</h3>
       <p class="modal-text">Manual tasks can use any future due date or stay undated.</p>
       <form id="add-task-form" class="task-form">
+        <label for="add-task-name-input" class="modal-label">Task name</label>
         <input type="text" id="add-task-name-input" placeholder="Task name" required maxlength="120">
+        <label for="add-task-description-input" class="modal-label">Description</label>
         <textarea id="add-task-description-input" placeholder="Description (optional)" rows="3"></textarea>
         <div class="add-task-project-row">
           <label for="add-task-project-select" class="modal-label">Project</label>
           <select id="add-task-project-select" class="add-task-project-select"></select>
         </div>
+        <label for="add-task-date-input" class="modal-label">Due date</label>
         <input type="date" id="add-task-date-input">
         <div class="date-quick-actions">
           <button type="button" class="date-quick-btn" data-target="add-task-date-input" data-action="clear">No Due Date</button>
@@ -298,10 +252,10 @@
     </div>
   </div>
 
-  <div id="config-modal" class="modal hidden" aria-hidden="true">
+  <div id="config-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="config-modal-title" aria-hidden="true">
     <div class="modal-card modal-card-wide">
       <div class="config-modal-body">
-        <h3>Project Configuration</h3>
+        <h3 id="config-modal-title">Project Configuration</h3>
         <p class="modal-text">Paste your recurring task rules below, or upload a <code>.txt</code> file. Each line should be in the format: <code>task name-daily-daily</code>, <code>task name-workdays-workdays</code>, <code>task name-weekly-monday,friday</code>, <code>task name-monthly-1</code>, <code>task name-annual-MM-DD</code>, <code>task name-everyNweeks-YYYY-MM-DD</code>, or <code>task name-everyNmonths-YYYY-MM-DD</code> (where N is any positive integer). Lines starting with <code>#</code> are comments.</p>
 
         <div class="task-builder">
@@ -440,6 +394,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="supabase-config.js"></script>
+  <script src="core.js"></script>
   <script src="app.js"></script>
   <script>
     if ("serviceWorker" in navigator) {

@@ -3,23 +3,16 @@
 
   const STORAGE_KEY = "task_planner_state_v1";
   const PROJECT_CONFIGS_STORAGE_KEY = "task_planner_project_configs_v1";
-  const HIDDEN_PROJECTS_STORAGE_KEY = "task_planner_hidden_projects_v1";
   const PROJECT_TAG_FILTERS_STORAGE_KEY = "task_planner_project_tag_filters_v1";
   const RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY = "task_planner_recurring_task_descriptions_v1";
-  const LAST_SYNC_TIME_STORAGE_KEY = "task_planner_last_sync_time_v1";
   const USER_SETTINGS_TABLE = "user_settings";
   const PROJECTS_TABLE = "projects";
   const TASKS_TABLE = "tasks";
   const ARCHIVED_TASKS_TABLE = "archived_tasks";
   const GENERATED_OCCURRENCES_TABLE = "generated_occurrences";
-  const TASK_TOMBSTONES_TABLE = "task_tombstones";
-  const PROJECT_TOMBSTONES_TABLE = "project_tombstones";
   const RECURRING_TASK_DESCRIPTIONS_TABLE = "recurring_task_descriptions";
   const TAGS_TABLE = "tags";
   const PROJECT_TAGS_TABLE = "project_tags";
-  const SAVE_DELAY_MS = 2000;
-  const COMPLETE_DELAY_MS = 2000;
-  const COMPLETE_WARNING_LEAD_MS = 1000;
   const BACKUP_DOWNLOAD_DELAY_MS = 150;
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
@@ -88,11 +81,7 @@
   let currentUser = null;
   let appEntered = false;
   let eventsBound = false;
-  let syncInFlight = false;
   let lastPullAt = 0;
-  let lastPulledRemoteStateUpdatedAt = null;
-  let requiresFreshPullBeforePush = true;
-  let saveTimer = null;
   let currentProjectId = null;
   let selectedDate = todayKey();
   let selectedTaskView = "day";
@@ -100,7 +89,6 @@
   let expandedTaskCards = {};
   let deferTaskId = null;
   let editTaskId = null;
-  let pendingTaskCompletions = {};
   let configModalProjectId = null;
 
   let projectConfigs = {};
@@ -110,13 +98,12 @@
   // Keyed by exact task name (case-sensitive). Loaded from localStorage on
   // startup and fetched from Supabase when signed in.
   let recurringTaskDescriptions = {};
-  let hiddenProjectIds = new Set();
   let selectedProjectTagFilters = new Set();
-  let showHiddenProjects = false;
   let showProjectActions = false;
   let appState = createEmptyState();
   let lastServerErrorToastAt = 0;
-  let forcedOfflineStartup = false;
+  let appMode = "loading";
+  let serverCommandInFlight = false;
 
   function nowIso() {
     return new Date().toISOString();
@@ -148,33 +135,6 @@
       deletedTasks: {},
       deletedArchivedTasks: {},
     };
-  }
-
-  function buildPendingTaskCompletionKey(projectId, taskId) {
-    return projectId + "::" + taskId;
-  }
-
-  function getPendingTaskCompletion(projectId, taskId) {
-    if (!projectId || !taskId) return null;
-    return pendingTaskCompletions[buildPendingTaskCompletionKey(projectId, taskId)] || null;
-  }
-
-  function clearPendingTaskCompletion(projectId, taskId) {
-    const pendingKey = buildPendingTaskCompletionKey(projectId, taskId);
-    const pending = pendingTaskCompletions[pendingKey];
-    if (!pending) return null;
-    clearTimeout(pending.timeoutId);
-    clearTimeout(pending.warningTimeoutId);
-    delete pendingTaskCompletions[pendingKey];
-    return pending;
-  }
-
-  function clearAllPendingTaskCompletions() {
-    Object.keys(pendingTaskCompletions).forEach((pendingKey) => {
-      clearTimeout(pendingTaskCompletions[pendingKey].timeoutId);
-      clearTimeout(pendingTaskCompletions[pendingKey].warningTimeoutId);
-    });
-    pendingTaskCompletions = {};
   }
 
   function isPlainObject(value) {
@@ -395,207 +355,46 @@
     return normalized;
   }
 
-  function mergeTimestampMaps(localMap, remoteMap) {
-    const merged = {};
-    const keys = new Set(Object.keys(localMap || {}).concat(Object.keys(remoteMap || {})));
-    keys.forEach((key) => {
-      const localValue = localMap ? localMap[key] : null;
-      const remoteValue = remoteMap ? remoteMap[key] : null;
-      merged[key] = laterIso(localValue, remoteValue);
-    });
-    return merged;
-  }
-
-  function mergeGeneratedOccurrences(localMap, remoteMap) {
-    const merged = {};
-    const keys = new Set(Object.keys(localMap || {}).concat(Object.keys(remoteMap || {})));
-
-    keys.forEach((key) => {
-      const localEntry = localMap ? localMap[key] : null;
-      const remoteEntry = remoteMap ? remoteMap[key] : null;
-      if (!localEntry) {
-        merged[key] = remoteEntry;
-        return;
-      }
-      if (!remoteEntry) {
-        merged[key] = localEntry;
-        return;
-      }
-
-      merged[key] = {
-        createdAt: compareIso(localEntry.createdAt, remoteEntry.createdAt) <= 0 ? localEntry.createdAt : remoteEntry.createdAt,
-        taskId: localEntry.taskId || remoteEntry.taskId || null,
-        dueDate: localEntry.dueDate || remoteEntry.dueDate || null,
-        taskName: localEntry.taskName || remoteEntry.taskName || "",
-      };
-    });
-
-    return merged;
-  }
-
-  function mergeEntityMaps(localMap, remoteMap, tombstones) {
-    const merged = {};
-    const ids = new Set(Object.keys(localMap || {}).concat(Object.keys(remoteMap || {})));
-
-    ids.forEach((id) => {
-      const localEntity = localMap ? localMap[id] : null;
-      const remoteEntity = remoteMap ? remoteMap[id] : null;
-      const winningEntity = !localEntity
-        ? remoteEntity
-        : !remoteEntity
-          ? localEntity
-          : compareIso(localEntity.updatedAt, remoteEntity.updatedAt) >= 0
-            ? localEntity
-            : remoteEntity;
-
-      if (!winningEntity) return;
-      const deletionTime = tombstones ? tombstones[id] : null;
-      if (deletionTime && compareIso(deletionTime, winningEntity.updatedAt) >= 0) return;
-      merged[id] = winningEntity;
-    });
-
-    return merged;
-  }
-
-  function reconcileTaskCompletionConflicts(tasks, archived, deletedTasks, deletedArchivedTasks) {
-    const mergedTasks = { ...(tasks || {}) };
-    const mergedArchived = { ...(archived || {}) };
-    const mergedDeletedTasks = { ...(deletedTasks || {}) };
-    const mergedDeletedArchivedTasks = { ...(deletedArchivedTasks || {}) };
-
-    Object.keys(mergedArchived).forEach((taskId) => {
-      const activeTask = mergedTasks[taskId];
-      const archivedTask = mergedArchived[taskId];
-      if (!activeTask || !archivedTask) return;
-
-      const activeUpdatedAt = activeTask.updatedAt;
-      const archivedTransitionAt = archivedTask.completedAt || archivedTask.updatedAt;
-
-      if (compareIso(archivedTransitionAt, activeUpdatedAt) >= 0) {
-        delete mergedTasks[taskId];
-        mergedDeletedTasks[taskId] = laterIso(mergedDeletedTasks[taskId], archivedTransitionAt);
-      } else {
-        delete mergedArchived[taskId];
-        mergedDeletedArchivedTasks[taskId] = laterIso(mergedDeletedArchivedTasks[taskId], activeUpdatedAt);
-      }
-    });
-
-    return {
-      tasks: mergedTasks,
-      archived: mergedArchived,
-      deletedTasks: mergedDeletedTasks,
-      deletedArchivedTasks: mergedDeletedArchivedTasks,
-    };
-  }
-
-  function mergeProjectStates(projectId, localProject, remoteProject) {
-    if (!localProject) return normalizeProjectState(projectId, remoteProject);
-    if (!remoteProject) return normalizeProjectState(projectId, localProject);
-
-    const normalizedLocal = normalizeProjectState(projectId, localProject);
-    const normalizedRemote = normalizeProjectState(projectId, remoteProject);
-
-    const mergedDeletedTasks = mergeTimestampMaps(normalizedLocal.deletedTasks, normalizedRemote.deletedTasks);
-    const mergedDeletedArchivedTasks = mergeTimestampMaps(normalizedLocal.deletedArchivedTasks, normalizedRemote.deletedArchivedTasks);
-    const mergedTasks = mergeEntityMaps(normalizedLocal.tasks, normalizedRemote.tasks, mergedDeletedTasks);
-    const mergedArchivedTasks = mergeEntityMaps(normalizedLocal.archived, normalizedRemote.archived, mergedDeletedArchivedTasks);
-    const completionReconciled = reconcileTaskCompletionConflicts(
-      mergedTasks,
-      mergedArchivedTasks,
-      mergedDeletedTasks,
-      mergedDeletedArchivedTasks
-    );
-    const localProjectWinsMetadata = compareIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt) >= 0;
-
-    return {
-      projectId,
-      name: normalizedRemote.name || normalizedLocal.name || "",
-      tags: localProjectWinsMetadata ? normalizedLocal.tags : normalizedRemote.tags,
-      inactive: localProjectWinsMetadata ? !!normalizedLocal.inactive : !!normalizedRemote.inactive,
-      tasks: completionReconciled.tasks,
-      archived: completionReconciled.archived,
-      generatedOccurrences: mergeGeneratedOccurrences(normalizedLocal.generatedOccurrences, normalizedRemote.generatedOccurrences),
-      lastGeneratedThrough: maxDateKey(normalizedLocal.lastGeneratedThrough, normalizedRemote.lastGeneratedThrough),
-      updatedAt: laterIso(normalizedLocal.updatedAt, normalizedRemote.updatedAt),
-      deletedTasks: completionReconciled.deletedTasks,
-      deletedArchivedTasks: completionReconciled.deletedArchivedTasks,
-    };
-  }
-
-  function mergeStates(localState, remoteState) {
-    const local = normalizeState(localState);
-    const remote = normalizeState(remoteState);
-    const merged = createEmptyState();
-    merged.deletedProjects = mergeTimestampMaps(local.deletedProjects, remote.deletedProjects);
-    const projectIds = new Set(
-      Object.keys(local.projects)
-        .concat(Object.keys(remote.projects))
-        .concat(Object.keys(merged.deletedProjects))
-    );
-    const localDefaultUpdatedAt = local.defaultProjectUpdatedAt || local.updatedAt;
-    const remoteDefaultUpdatedAt = remote.defaultProjectUpdatedAt || remote.updatedAt;
-
-    projectIds.forEach((projectId) => {
-      const localProject = local.projects[projectId];
-      const remoteProject = remote.projects[projectId];
-      if (!localProject && !remoteProject) return;
-      const mergedProject = mergeProjectStates(projectId, localProject, remoteProject);
-      const deletedAt = merged.deletedProjects[projectId];
-      if (deletedAt && compareIso(deletedAt, mergedProject.updatedAt) >= 0) return;
-      merged.projects[projectId] = mergedProject;
-    });
-
-    merged.updatedAt = laterIso(local.updatedAt, remote.updatedAt);
-    if (compareIso(localDefaultUpdatedAt, remoteDefaultUpdatedAt) >= 0) {
-      merged.defaultProjectId = local.defaultProjectId;
-      merged.defaultProjectUpdatedAt = localDefaultUpdatedAt;
-    } else {
-      merged.defaultProjectId = remote.defaultProjectId;
-      merged.defaultProjectUpdatedAt = remoteDefaultUpdatedAt;
-    }
-    return normalizeState(merged);
-  }
-
   function loadLocalState() {
-    clearAllPendingTaskCompletions();
+    const storageKey = getUserStorageKey(STORAGE_KEY);
+    if (!storageKey) {
+      appState = createEmptyState();
+      return false;
+    }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       appState = raw ? normalizeState(JSON.parse(raw)) : createEmptyState();
+      return !!raw;
     } catch (error) {
       console.warn("Failed to load local task state:", error);
       appState = createEmptyState();
+      return false;
     }
   }
 
   function saveStateLocal() {
+    const storageKey = getUserStorageKey(STORAGE_KEY);
+    if (!storageKey) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+      localStorage.setItem(storageKey, JSON.stringify(appState));
     } catch (error) {
       console.warn("Failed to save local task state:", error);
     }
   }
 
-  function loadHiddenProjects() {
-    try {
-      const raw = localStorage.getItem(HIDDEN_PROJECTS_STORAGE_KEY);
-      hiddenProjectIds = raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch (error) {
-      console.warn("Failed to load hidden projects:", error);
-      hiddenProjectIds = new Set();
-    }
-  }
-
-  function saveHiddenProjects() {
-    try {
-      localStorage.setItem(HIDDEN_PROJECTS_STORAGE_KEY, JSON.stringify(Array.from(hiddenProjectIds)));
-    } catch (error) {
-      console.warn("Failed to save hidden projects:", error);
-    }
+  function getUserStorageKey(baseKey, userId) {
+    const resolvedUserId = userId || (currentUser && currentUser.id);
+    return window.TaskPlannerCore.buildUserStorageKey(baseKey, resolvedUserId);
   }
 
   function loadProjectTagFilters() {
+    const storageKey = getUserStorageKey(PROJECT_TAG_FILTERS_STORAGE_KEY);
+    if (!storageKey) {
+      selectedProjectTagFilters = new Set();
+      return;
+    }
     try {
-      const raw = localStorage.getItem(PROJECT_TAG_FILTERS_STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       const parsed = raw ? JSON.parse(raw) : [];
       selectedProjectTagFilters = new Set(normalizeTagList(parsed));
     } catch (error) {
@@ -605,266 +404,38 @@
   }
 
   function saveProjectTagFilters() {
+    const storageKey = getUserStorageKey(PROJECT_TAG_FILTERS_STORAGE_KEY);
+    if (!storageKey) return;
     try {
-      localStorage.setItem(PROJECT_TAG_FILTERS_STORAGE_KEY, JSON.stringify(Array.from(selectedProjectTagFilters)));
+      localStorage.setItem(storageKey, JSON.stringify(Array.from(selectedProjectTagFilters)));
     } catch (error) {
       console.warn("Failed to save project tag filters:", error);
     }
   }
 
-  function saveLastSyncTime(timestamp) {
-    try {
-      if (timestamp) {
-        localStorage.setItem(LAST_SYNC_TIME_STORAGE_KEY, timestamp);
-      } else {
-        localStorage.removeItem(LAST_SYNC_TIME_STORAGE_KEY);
-      }
-    } catch (error) {
-      console.warn("Failed to save last sync time:", error);
-    }
-  }
-
-  function loadLastSyncTime() {
-    try {
-      return localStorage.getItem(LAST_SYNC_TIME_STORAGE_KEY) || null;
-    } catch (error) {
-      console.warn("Failed to load last sync time:", error);
-      return null;
-    }
-  }
-
-  function hideProject(projectId) {
-    hiddenProjectIds.add(projectId);
-    saveHiddenProjects();
-    renderHome();
-  }
-
-  function unhideProject(projectId) {
-    hiddenProjectIds.delete(projectId);
-    saveHiddenProjects();
-    renderHome();
-  }
-
-  function touchProject(projectState, timestamp) {
-    const nextTimestamp = timestamp || nowIso();
-    projectState.updatedAt = nextTimestamp;
-    appState.updatedAt = nextTimestamp;
-  }
-
-  function schedulePersist(message) {
-    clearTimeout(saveTimer);
-    if (message) setSyncStatus(message);
-    saveTimer = setTimeout(() => {
-      persistState();
-    }, SAVE_DELAY_MS);
-  }
-
-  async function persistState() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-
-    if (!isOnline()) {
-      setSyncStatus("Offline — changes are not saved.");
-      return;
-    }
-
-    saveStateLocal();
-
-    if (currentUser) {
-      const pushed = await pushStateGuarded({ forcePull: true });
-      if (pushed) {
-        setSyncStatus("Saved and synced.");
-      } else {
-        setSyncStatus("Cloud sync failed.");
-      }
-      return;
-    }
-
-    setSyncStatus(supabase ? "Saved locally. Sign in to sync." : "Saved locally.");
-  }
-
-  function flushLocalState() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    saveStateLocal();
-  }
-
-  function markRemoteStateStale() {
-    requiresFreshPullBeforePush = true;
-  }
-
   function resetSyncTracking() {
     lastPullAt = 0;
-    lastPulledRemoteStateUpdatedAt = null;
-    requiresFreshPullBeforePush = true;
-    saveLastSyncTime(null);
   }
 
-  function clearAllLocalPersistence() {
+  function clearAllLocalPersistence(userId) {
     try {
+      [
+        STORAGE_KEY,
+        PROJECT_CONFIGS_STORAGE_KEY,
+        PROJECT_TAG_FILTERS_STORAGE_KEY,
+        RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY,
+      ].forEach((baseKey) => {
+        const storageKey = getUserStorageKey(baseKey, userId);
+        if (storageKey) localStorage.removeItem(storageKey);
+      });
+      // Remove pre-user-scoping data so it cannot leak into an authenticated session.
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(PROJECT_CONFIGS_STORAGE_KEY);
-      localStorage.removeItem(HIDDEN_PROJECTS_STORAGE_KEY);
       localStorage.removeItem(PROJECT_TAG_FILTERS_STORAGE_KEY);
       localStorage.removeItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
-      localStorage.removeItem(LAST_SYNC_TIME_STORAGE_KEY);
     } catch (error) {
       console.warn("Failed to clear local persistence:", error);
     }
-  }
-
-  async function ensureFreshRemoteStateBeforePush(forcePull) {
-    if (!supabase || !currentUser) return false;
-    const shouldPull = !!forcePull || requiresFreshPullBeforePush || !lastPullAt;
-    if (!shouldPull) return true;
-    return pullState();
-  }
-
-  function buildNormalizedRowsFromState(state) {
-    const normalizedState = normalizeState(state);
-    const userId = currentUser ? currentUser.id : null;
-    if (!userId) {
-      return {
-        userSettings: null,
-        projects: [],
-        tasks: [],
-        archivedTasks: [],
-        generatedOccurrences: [],
-        tombstones: [],
-        projectTombstones: [],
-        tags: [],
-        projectTags: [],
-      };
-    }
-
-    const rows = {
-      userSettings: {
-        user_id: userId,
-        default_project_id: normalizedState.defaultProjectId,
-        default_project_updated_at: normalizedState.defaultProjectUpdatedAt || normalizedState.updatedAt || nowIso(),
-        updated_at: normalizedState.updatedAt || nowIso(),
-      },
-      projects: [],
-      tasks: [],
-      archivedTasks: [],
-      generatedOccurrences: [],
-      tombstones: [],
-      projectTombstones: [],
-      tags: [],
-      projectTags: [],
-    };
-
-    Object.keys(normalizedState.projects).forEach((projectId) => {
-      const project = normalizeProjectState(projectId, normalizedState.projects[projectId]);
-
-      rows.projects.push({
-        user_id: userId,
-        id: projectId,
-        name: project.name || "",
-        inactive: !!project.inactive,
-        last_generated_through: project.lastGeneratedThrough,
-        updated_at: project.updatedAt || normalizedState.updatedAt || nowIso(),
-      });
-
-      project.tags.forEach((tag) => {
-        rows.tags.push({
-          user_id: userId,
-          tag,
-        });
-        rows.projectTags.push({
-          user_id: userId,
-          project_id: projectId,
-          tag,
-        });
-      });
-
-      Object.keys(project.tasks || {}).forEach((taskId) => {
-        const task = project.tasks[taskId];
-        rows.tasks.push({
-          user_id: userId,
-          project_id: projectId,
-          id: task.id,
-          name: task.name || "",
-          due_date: task.dueDate,
-          source: task.source === "generated" ? "generated" : "manual",
-          generated_key: task.generatedKey || null,
-          pinned: !!task.pinned,
-          end_of_day: !!task.endOfDay,
-          body: task.description || "",
-          created_at: task.createdAt || task.updatedAt || nowIso(),
-          updated_at: task.updatedAt || nowIso(),
-        });
-      });
-
-      Object.keys(project.archived || {}).forEach((taskId) => {
-        const task = project.archived[taskId];
-        rows.archivedTasks.push({
-          user_id: userId,
-          project_id: projectId,
-          id: task.id,
-          name: task.name || "",
-          due_date: task.dueDate,
-          source: task.source === "generated" ? "generated" : "manual",
-          generated_key: task.generatedKey || null,
-          pinned: !!task.pinned,
-          end_of_day: !!task.endOfDay,
-          completed_at: task.completedAt || null,
-          created_at: task.createdAt || task.updatedAt || nowIso(),
-          updated_at: task.updatedAt || nowIso(),
-        });
-      });
-
-      Object.keys(project.generatedOccurrences || {}).forEach((occurrenceKey) => {
-        const occurrence = project.generatedOccurrences[occurrenceKey];
-        rows.generatedOccurrences.push({
-          user_id: userId,
-          project_id: projectId,
-          occurrence_key: occurrenceKey,
-          task_id: occurrence.taskId || null,
-          due_date: occurrence.dueDate || null,
-          task_name: occurrence.taskName || "",
-          created_at: occurrence.createdAt || nowIso(),
-        });
-      });
-
-      Object.keys(project.deletedTasks || {}).forEach((taskId) => {
-        rows.tombstones.push({
-          user_id: userId,
-          project_id: projectId,
-          task_id: taskId,
-          is_archived: false,
-          deleted_at: project.deletedTasks[taskId],
-        });
-      });
-
-      Object.keys(project.deletedArchivedTasks || {}).forEach((taskId) => {
-        rows.tombstones.push({
-          user_id: userId,
-          project_id: projectId,
-          task_id: taskId,
-          is_archived: true,
-          deleted_at: project.deletedArchivedTasks[taskId],
-        });
-      });
-    });
-
-    Object.keys(normalizedState.deletedProjects || {}).forEach((projectId) => {
-      rows.projectTombstones.push({
-        user_id: userId,
-        project_id: projectId,
-        deleted_at: normalizedState.deletedProjects[projectId],
-      });
-    });
-
-    const dedupedTags = new Map();
-    rows.tags.forEach((row) => {
-      if (!dedupedTags.has(row.tag)) {
-        dedupedTags.set(row.tag, row);
-      }
-    });
-    rows.tags = Array.from(dedupedTags.values());
-
-    return rows;
   }
 
   function buildStateFromNormalizedRows(payload) {
@@ -876,8 +447,6 @@
     const payloadArchivedTasks = Array.isArray(payload.archivedTasks) ? payload.archivedTasks : [];
     const payloadGeneratedOccurrences = Array.isArray(payload.generatedOccurrences) ? payload.generatedOccurrences : [];
     const payloadDescriptions = Array.isArray(payload.descriptions) ? payload.descriptions : [];
-    const payloadTombstones = Array.isArray(payload.tombstones) ? payload.tombstones : [];
-    const payloadProjectTombstones = Array.isArray(payload.projectTombstones) ? payload.projectTombstones : [];
     const payloadProjectTags = Array.isArray(payload.projectTags) ? payload.projectTags : [];
 
     if (payload.userSettings) {
@@ -936,6 +505,14 @@
       descriptionsByTaskKey[key] = typeof row.body === "string" ? row.body : "";
     });
 
+    // Archived tasks also carry body directly (migration 0005) – prefer it over
+    // any legacy description lookup so archived descriptions survive cross-device sync.
+    payloadArchivedTasks.forEach((row) => {
+      if (!row || typeof row.project_id !== "string" || typeof row.id !== "string") return;
+      const key = row.project_id + "::" + row.id;
+      if (typeof row.body === "string") descriptionsByTaskKey[key] = row.body;
+    });
+
     payloadDescriptions.forEach((row) => {
       if (!row || typeof row.project_id !== "string" || typeof row.task_id !== "string") return;
       const key = row.project_id + "::" + row.task_id;
@@ -952,7 +529,7 @@
         id: row.id,
         projectId: row.project_id,
         name: row.name,
-        description: descriptionsByTaskKey[projectId + "::" + row.id] || "",
+        description: typeof row.body === "string" ? row.body : "",
         dueDate: row.due_date,
         source: row.source,
         generatedKey: row.generated_key,
@@ -1009,36 +586,6 @@
       nextState.updatedAt = laterIso(nextState.updatedAt, createdAt);
     });
 
-    payloadTombstones.forEach((row) => {
-      if (!row || typeof row.project_id !== "string" || typeof row.task_id !== "string") return;
-      const projectId = row.project_id;
-      if (!projectsById[projectId]) {
-        projectsById[projectId] = createEmptyProjectState(projectId, "");
-      }
-      const deletedAt = typeof row.deleted_at === "string" ? row.deleted_at : nowIso();
-      if (row.is_archived) {
-        projectsById[projectId].deletedArchivedTasks = projectsById[projectId].deletedArchivedTasks || {};
-        projectsById[projectId].deletedArchivedTasks[row.task_id] = deletedAt;
-      } else {
-        projectsById[projectId].deletedTasks = projectsById[projectId].deletedTasks || {};
-        projectsById[projectId].deletedTasks[row.task_id] = deletedAt;
-      }
-    });
-
-    payloadProjectTombstones.forEach((row) => {
-      if (!row || typeof row.project_id !== "string" || !row.project_id) return;
-      const deletedAt = typeof row.deleted_at === "string" ? row.deleted_at : nowIso();
-      nextState.deletedProjects[row.project_id] = deletedAt;
-    });
-
-    Object.keys(nextState.deletedProjects).forEach((projectId) => {
-      const projectState = projectsById[projectId];
-      if (!projectState) return;
-      if (compareIso(nextState.deletedProjects[projectId], projectState.updatedAt) >= 0) {
-        delete projectsById[projectId];
-      }
-    });
-
     nextState.projects = projectsById;
     return normalizeState(nextState);
   }
@@ -1053,8 +600,6 @@
       tasksRes,
       archivedTasksRes,
       generatedOccurrencesRes,
-      tombstonesRes,
-      projectTombstonesRes,
       tagsRes,
       projectTagsRes,
     ] = await Promise.all([
@@ -1066,10 +611,8 @@
         .maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, created_at, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, completed_at, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
-      supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("project_id, task_id, is_archived, deleted_at").eq("user_id", userId),
-      supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("project_id, deleted_at").eq("user_id", userId),
       supabase.schema("todo").from(TAGS_TABLE).select("tag").eq("user_id", userId),
       supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("project_id, tag").eq("user_id", userId),
     ]);
@@ -1080,8 +623,6 @@
       tasksRes.error,
       archivedTasksRes.error,
       generatedOccurrencesRes.error,
-      tombstonesRes.error,
-      projectTombstonesRes.error,
       tagsRes.error,
       projectTagsRes.error,
     ].find(Boolean);
@@ -1097,261 +638,9 @@
       archivedTasks: archivedTasksRes.data,
       generatedOccurrences: generatedOccurrencesRes.data,
       descriptions: [],
-      tombstones: tombstonesRes.data || [],
-      projectTombstones: projectTombstonesRes.data || [],
       tags: tagsRes.data || [],
       projectTags: projectTagsRes.data || [],
     });
-  }
-
-  async function fetchRemoteSyncMarker() {
-    if (!supabase || !currentUser) return null;
-    const userId = currentUser.id;
-
-    const [
-      userSettingsRes,
-      projectsRes,
-      tasksRes,
-      archivedTasksRes,
-      tombstonesRes,
-      projectTombstonesRes,
-      tagsRes,
-      projectTagsRes,
-    ] = await Promise.all([
-      supabase.schema("todo").from(USER_SETTINGS_TABLE).select("updated_at").eq("user_id", userId).maybeSingle(),
-      supabase.schema("todo").from(PROJECTS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).select("deleted_at").eq("user_id", userId).order("deleted_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(TAGS_TABLE).select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1),
-      supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1),
-    ]);
-
-    const firstError = [
-      userSettingsRes.error,
-      projectsRes.error,
-      tasksRes.error,
-      archivedTasksRes.error,
-      tombstonesRes.error,
-      projectTombstonesRes.error,
-      tagsRes.error,
-      projectTagsRes.error,
-    ].find(Boolean);
-    if (firstError) throw firstError;
-
-    const candidates = [];
-    if (userSettingsRes.data && typeof userSettingsRes.data.updated_at === "string" && userSettingsRes.data.updated_at) {
-      candidates.push(userSettingsRes.data.updated_at);
-    }
-    const latestProject = Array.isArray(projectsRes.data) ? projectsRes.data[0] : null;
-    if (latestProject && typeof latestProject.updated_at === "string" && latestProject.updated_at) {
-      candidates.push(latestProject.updated_at);
-    }
-    const latestTask = Array.isArray(tasksRes.data) ? tasksRes.data[0] : null;
-    if (latestTask && typeof latestTask.updated_at === "string" && latestTask.updated_at) {
-      candidates.push(latestTask.updated_at);
-    }
-    const latestArchivedTask = Array.isArray(archivedTasksRes.data) ? archivedTasksRes.data[0] : null;
-    if (latestArchivedTask && typeof latestArchivedTask.updated_at === "string" && latestArchivedTask.updated_at) {
-      candidates.push(latestArchivedTask.updated_at);
-    }
-    const latestTaskTombstone = Array.isArray(tombstonesRes.data) ? tombstonesRes.data[0] : null;
-    if (latestTaskTombstone && typeof latestTaskTombstone.deleted_at === "string" && latestTaskTombstone.deleted_at) {
-      candidates.push(latestTaskTombstone.deleted_at);
-    }
-    const latestProjectTombstone = Array.isArray(projectTombstonesRes.data) ? projectTombstonesRes.data[0] : null;
-    if (latestProjectTombstone && typeof latestProjectTombstone.deleted_at === "string" && latestProjectTombstone.deleted_at) {
-      candidates.push(latestProjectTombstone.deleted_at);
-    }
-    const latestTag = Array.isArray(tagsRes.data) ? tagsRes.data[0] : null;
-    if (latestTag && typeof latestTag.updated_at === "string" && latestTag.updated_at) {
-      candidates.push(latestTag.updated_at);
-    }
-    const latestProjectTag = Array.isArray(projectTagsRes.data) ? projectTagsRes.data[0] : null;
-    if (latestProjectTag && typeof latestProjectTag.created_at === "string" && latestProjectTag.created_at) {
-      candidates.push(latestProjectTag.created_at);
-    }
-
-    return candidates.reduce((latest, value) => (latest && compareIso(latest, value) >= 0 ? latest : value), null);
-  }
-
-  async function pushStateGuarded(options) {
-    if (!supabase || !currentUser) return false;
-
-    const forcePull = !!(options && options.forcePull);
-
-    const pulledBeforePush = await ensureFreshRemoteStateBeforePush(forcePull);
-    if (!pulledBeforePush) return false;
-
-    const pushed = await pushState();
-    if (pushed) {
-      // Post-push pull: refresh local state to exactly match what we wrote to the server.
-      await pullState();
-    }
-    return pushed;
-  }
-
-  async function pushState() {
-    if (!supabase || !currentUser || syncInFlight) return false;
-
-    syncInFlight = true;
-    try {
-      const userId = currentUser.id;
-      const rows = buildNormalizedRowsFromState(appState);
-      if (!rows.userSettings) return false;
-
-      const [
-        remoteProjectsRes,
-        remoteTasksRes,
-        remoteArchivedTasksRes,
-        remoteGeneratedOccurrencesRes,
-        remoteTagsRes,
-        remoteProjectTagsRes,
-      ] = await Promise.all([
-        supabase.schema("todo").from(PROJECTS_TABLE).select("id").eq("user_id", userId),
-        supabase.schema("todo").from(TASKS_TABLE).select("project_id, id").eq("user_id", userId),
-        supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("project_id, id").eq("user_id", userId),
-        supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("project_id, occurrence_key").eq("user_id", userId),
-        supabase.schema("todo").from(TAGS_TABLE).select("tag").eq("user_id", userId),
-        supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("project_id, tag").eq("user_id", userId),
-      ]);
-
-      const remoteFetchError = [
-        remoteProjectsRes.error,
-        remoteTasksRes.error,
-        remoteArchivedTasksRes.error,
-        remoteGeneratedOccurrencesRes.error,
-        remoteTagsRes.error,
-        remoteProjectTagsRes.error,
-      ].find(Boolean);
-      if (remoteFetchError) {
-        console.error("Sync push error:", remoteFetchError.message);
-        showServerConnectionIssue(remoteFetchError, "sync-push-fetch");
-        return false;
-      }
-
-      const localProjectIds = new Set(rows.projects.map((row) => row.id));
-      const localTaskKeys = new Set(rows.tasks.map((row) => row.project_id + "::" + row.id));
-      const localArchivedTaskKeys = new Set(rows.archivedTasks.map((row) => row.project_id + "::" + row.id));
-      const localOccurrenceKeys = new Set(rows.generatedOccurrences.map((row) => row.project_id + "::" + row.occurrence_key));
-      const localTags = new Set(rows.tags.map((row) => row.tag));
-      const localProjectTagKeys = new Set(rows.projectTags.map((row) => row.project_id + "::" + row.tag));
-
-      const deleteOperations = [];
-      (remoteProjectsRes.data || []).forEach((row) => {
-        if (!localProjectIds.has(row.id)) {
-          deleteOperations.push(
-            supabase.schema("todo").from(PROJECTS_TABLE).delete().eq("user_id", userId).eq("id", row.id)
-          );
-        }
-      });
-      (remoteTasksRes.data || []).forEach((row) => {
-        if (!localTaskKeys.has(row.project_id + "::" + row.id)) {
-          deleteOperations.push(
-            supabase.schema("todo").from(TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
-          );
-        }
-      });
-      (remoteArchivedTasksRes.data || []).forEach((row) => {
-        if (!localArchivedTaskKeys.has(row.project_id + "::" + row.id)) {
-          deleteOperations.push(
-            supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("id", row.id)
-          );
-        }
-      });
-      (remoteGeneratedOccurrencesRes.data || []).forEach((row) => {
-        if (!localOccurrenceKeys.has(row.project_id + "::" + row.occurrence_key)) {
-          deleteOperations.push(
-            supabase
-              .schema("todo")
-              .from(GENERATED_OCCURRENCES_TABLE)
-              .delete()
-              .eq("user_id", userId)
-              .eq("project_id", row.project_id)
-              .eq("occurrence_key", row.occurrence_key)
-          );
-        }
-      });
-      (remoteProjectTagsRes.data || []).forEach((row) => {
-        if (!localProjectTagKeys.has(row.project_id + "::" + row.tag)) {
-          deleteOperations.push(
-            supabase.schema("todo").from(PROJECT_TAGS_TABLE).delete().eq("user_id", userId).eq("project_id", row.project_id).eq("tag", row.tag)
-          );
-        }
-      });
-      (remoteTagsRes.data || []).forEach((row) => {
-        if (!localTags.has(row.tag)) {
-          deleteOperations.push(
-            supabase.schema("todo").from(TAGS_TABLE).delete().eq("user_id", userId).eq("tag", row.tag)
-          );
-        }
-      });
-
-      if (deleteOperations.length) {
-        const deleteResults = await Promise.all(deleteOperations);
-        const deleteError = deleteResults.map((result) => result.error).find(Boolean);
-        if (deleteError) {
-          console.error("Sync push error:", deleteError.message);
-          showServerConnectionIssue(deleteError, "sync-push-delete");
-          return false;
-        }
-      }
-
-      const upsertOperations = [
-        supabase.schema("todo").from(USER_SETTINGS_TABLE).upsert(rows.userSettings, { onConflict: "user_id" }),
-      ];
-      if (rows.projects.length) {
-        upsertOperations.push(supabase.schema("todo").from(PROJECTS_TABLE).upsert(rows.projects, { onConflict: "user_id,id" }));
-      }
-      if (rows.tasks.length) {
-        upsertOperations.push(supabase.schema("todo").from(TASKS_TABLE).upsert(rows.tasks, { onConflict: "user_id,project_id,id" }));
-      }
-      if (rows.archivedTasks.length) {
-        upsertOperations.push(supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).upsert(rows.archivedTasks, { onConflict: "user_id,project_id,id" }));
-      }
-      if (rows.generatedOccurrences.length) {
-        upsertOperations.push(
-          supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).upsert(rows.generatedOccurrences, { onConflict: "user_id,project_id,occurrence_key" })
-        );
-      }
-      if (rows.tombstones.length) {
-        upsertOperations.push(
-          supabase.schema("todo").from(TASK_TOMBSTONES_TABLE).upsert(rows.tombstones, { onConflict: "user_id,project_id,task_id,is_archived" })
-        );
-      }
-      if (rows.projectTombstones.length) {
-        upsertOperations.push(
-          supabase.schema("todo").from(PROJECT_TOMBSTONES_TABLE).upsert(rows.projectTombstones, { onConflict: "user_id,project_id" })
-        );
-      }
-      if (rows.tags.length) {
-        upsertOperations.push(
-          supabase.schema("todo").from(TAGS_TABLE).upsert(rows.tags, { onConflict: "user_id,tag" })
-        );
-      }
-      if (rows.projectTags.length) {
-        upsertOperations.push(
-          supabase.schema("todo").from(PROJECT_TAGS_TABLE).upsert(rows.projectTags, { onConflict: "user_id,project_id,tag" })
-        );
-      }
-
-      const upsertResults = await Promise.all(upsertOperations);
-      const upsertError = upsertResults.map((result) => result.error).find(Boolean);
-      if (upsertError) {
-        console.error("Sync push error:", upsertError.message);
-        showServerConnectionIssue(upsertError, "sync-push-upsert");
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Sync push exception:", error);
-      showServerConnectionIssue(error, "sync-push-exception");
-      return false;
-    } finally {
-      syncInFlight = false;
-    }
   }
 
   async function pullState() {
@@ -1362,15 +651,13 @@
       if (!remoteState) return false;
       // Server is the source of truth: always use server state directly.
       appState = normalizeState(remoteState);
+      appMode = "online";
       saveStateLocal();
       lastPullAt = Date.now();
-      lastPulledRemoteStateUpdatedAt =
-        typeof remoteState.updatedAt === "string" && remoteState.updatedAt ? remoteState.updatedAt : nowIso();
-      saveLastSyncTime(lastPulledRemoteStateUpdatedAt);
-      requiresFreshPullBeforePush = false;
       return true;
     } catch (error) {
       console.error("Sync pull error:", error.message || error);
+      if (isServerConnectionError(error)) appMode = "offline-readonly";
       showServerConnectionIssue(error, "sync-pull");
       return false;
     }
@@ -1378,236 +665,28 @@
 
   async function syncNow() {
     if (!currentUser) return;
-    setSyncStatus("Syncing now...");
+    if (!hasNetworkConnection()) {
+      appMode = "offline-readonly";
+      updateOfflineBanner();
+      setSyncStatus("Offline — showing cached data in read-only mode.");
+      return;
+    }
+    setSyncStatus("Refreshing from server...");
     const pulled = await pullState();
-    const generation = generateTasksForAllProjects();
-    if (generation.changed) {
-      saveStateLocal();
-    }
-    const pushed = await pushStateGuarded();
-    renderCurrentScreen();
-    if (pulled && pushed) {
-      setSyncStatus("Sync complete.");
-    } else if (isOfflineModeExpected()) {
-      setSyncStatus("Saved locally. Cloud sync will retry when you are online.");
-    } else {
-      setSyncStatus("Cloud sync failed. Changes are saved locally and will retry.");
-      showToast("Cloud sync failed. Local changes are safe.");
-    }
-  }
-
-  async function resetLocalStateFromServer() {
-    if (!currentUser || !supabase) {
-      showToast("Sign in to reset local state from server.");
-      return;
-    }
-
-    if (!navigator.onLine) {
-      setSyncStatus("Cannot reset while offline.");
-      showToast("Reconnect to the internet and try again.");
-      return;
-    }
-
-    if (!confirm("Wipe all local state on this device and download a fresh copy from the server?")) {
-      return;
-    }
-
-    setSyncStatus("Fetching latest server state...");
-
-    try {
-      const remoteState = await fetchNormalizedRemoteState();
-      if (!remoteState) {
-        setSyncStatus("Could not load server state.");
-        showToast("Could not load server state.");
-        return;
-      }
-
-      clearTimeout(saveTimer);
-      saveTimer = null;
-      resetSyncTracking();
-      clearAllLocalPersistence();
-
-      appState = normalizeState(remoteState);
-      saveStateLocal();
-      lastPullAt = Date.now();
-      lastPulledRemoteStateUpdatedAt =
-        typeof remoteState.updatedAt === "string" && remoteState.updatedAt ? remoteState.updatedAt : nowIso();
-      saveLastSyncTime(lastPulledRemoteStateUpdatedAt);
-      requiresFreshPullBeforePush = false;
-
+    if (pulled) {
       await fetchAllProjectConfigsFromDb();
       await fetchAllRecurringTaskDescriptionsFromDb();
       rebuildProjectConfigs();
-      generateTasksForAllProjects();
-      setSyncStatus("Local state reset. Reloading from fresh server-backed state…");
-      showToast("Local state cleared. Reloading fresh state from the server…");
-      window.location.reload();
-    } catch (error) {
-      console.error("Reset local state error:", error);
-      showServerConnectionIssue(error, "local-state-reset");
-      setSyncStatus("Could not reset local state from server.");
-      showToast("Could not reset local state from server.");
+      await generateTasksForProjectsOnServer(Object.keys(projectConfigs));
     }
-  }
-
-  // --- Force resync: compare local vs remote and confirm before merging ---
-
-  async function fetchRemoteStateRaw() {
-    if (!supabase || !currentUser) return null;
-    try {
-      return await fetchNormalizedRemoteState();
-    } catch (error) {
-      console.error("Resync fetch exception:", error);
-      return null;
+    renderCurrentScreen();
+    if (pulled) {
+      setSyncStatus("Refreshed from server.");
+    } else if (isOfflineModeExpected()) {
+      setSyncStatus("Offline — showing cached data in read-only mode.");
+    } else {
+      setSyncStatus("Could not refresh from server.");
     }
-  }
-
-  function diffLocalRemote(localState, remoteState) {
-    const local = normalizeState(localState);
-    const remote = normalizeState(remoteState);
-
-    const remoteNewer = []; // changes local will pull from remote
-    const localNewer = [];  // changes remote will receive from local
-
-    const allProjectIds = new Set(
-      Object.keys(local.projects)
-        .concat(Object.keys(remote.projects))
-        .concat(Object.keys(local.deletedProjects))
-        .concat(Object.keys(remote.deletedProjects))
-    );
-
-    allProjectIds.forEach((projectId) => {
-      const localProject = local.projects[projectId];
-      const remoteProject = remote.projects[projectId];
-      const localDeletedAt = local.deletedProjects[projectId];
-      const remoteDeletedAt = remote.deletedProjects[projectId];
-      const localDeleted = !!localDeletedAt && (!localProject || compareIso(localDeletedAt, localProject.updatedAt) >= 0);
-      const remoteDeleted = !!remoteDeletedAt && (!remoteProject || compareIso(remoteDeletedAt, remoteProject.updatedAt) >= 0);
-
-      if (localDeleted && remoteDeleted) return;
-
-      if (localDeleted && !remoteDeleted) {
-        localNewer.push({
-          kind: "project",
-          label: (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId,
-          detail: "Project deleted locally",
-        });
-        return;
-      }
-
-      if (remoteDeleted && !localDeleted) {
-        remoteNewer.push({
-          kind: "project",
-          label: (remoteProject && remoteProject.name) || (localProject && localProject.name) || projectId,
-          detail: "Project deleted remotely",
-          projectId,
-          discardLocalOnly: !!localProject,
-        });
-        return;
-      }
-
-      if (!localProject) {
-        const taskCount = Object.keys(remoteProject.tasks || {}).length;
-        remoteNewer.push({
-          kind: "project",
-          label: remoteProject.name || projectId,
-          detail: "Project exists remotely only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-        });
-        return;
-      }
-
-      if (!remoteProject) {
-        const taskCount = Object.keys(localProject.tasks || {}).length;
-        localNewer.push({
-          kind: "project",
-          label: localProject.name || projectId,
-          detail: "Project exists locally only (" + taskCount + " task" + (taskCount === 1 ? "" : "s") + ")",
-          projectId,
-          discardLocalOnly: true,
-        });
-        return;
-      }
-
-      const projectName = remoteProject.name || localProject.name || projectId;
-      const projectCmp = compareIso(localProject.updatedAt, remoteProject.updatedAt);
-      if (projectCmp > 0) {
-        localNewer.push({
-          kind: "project",
-          label: localProject.name || projectId,
-          detail: "Project metadata modified",
-        });
-      } else if (projectCmp < 0) {
-        remoteNewer.push({
-          kind: "project",
-          label: remoteProject.name || projectId,
-          detail: "Project metadata modified",
-        });
-      }
-
-      function collectEntityDifferences(localMap, remoteMap, entityLabel, archived) {
-        const allIds = new Set(
-          Object.keys(localMap || {}).concat(Object.keys(remoteMap || {}))
-        );
-
-        allIds.forEach((id) => {
-          const localEntity = (localMap || {})[id];
-          const remoteEntity = (remoteMap || {})[id];
-
-          if (!localEntity && remoteEntity) {
-            remoteNewer.push({
-              kind: "task",
-              label: remoteEntity.name || id,
-              projectName,
-              detail: entityLabel + " exists remotely only",
-            });
-          } else if (localEntity && !remoteEntity) {
-            localNewer.push({
-              kind: "task",
-              label: localEntity.name || id,
-              projectName,
-              detail: entityLabel + " exists locally only",
-              projectId,
-              taskId: id,
-              archived: !!archived,
-              discardLocalOnly: true,
-            });
-          } else if (localEntity && remoteEntity) {
-            const cmp = compareIso(localEntity.updatedAt, remoteEntity.updatedAt);
-            if (cmp > 0) {
-              localNewer.push({
-                kind: "task",
-                label: localEntity.name || id,
-                projectName,
-                detail: entityLabel + " modified",
-              });
-            } else if (cmp < 0) {
-              remoteNewer.push({
-                kind: "task",
-                label: remoteEntity.name || id,
-                projectName,
-                detail: entityLabel + " modified",
-              });
-            }
-          }
-        });
-      }
-
-      collectEntityDifferences(
-        localProject.tasks,
-        remoteProject.tasks,
-        "task",
-        false
-      );
-
-      collectEntityDifferences(
-        localProject.archived,
-        remoteProject.archived,
-        "completed task",
-        true
-      );
-    });
-
-    return { remoteNewer, localNewer };
   }
 
   function getVisibleProjectsForState(state, options) {
@@ -1622,1152 +701,14 @@
           name: projectState && projectState.name ? projectState.name : projectId,
           tags: normalizeTagList(projectState && projectState.tags),
           inactive: !!(projectState && projectState.inactive),
-          hidden: hiddenProjectIds.has(projectId),
         };
       })
-      .filter((project) => project.name && !project.inactive && (!project.hidden || showHiddenProjects))
+      .filter((project) => project.name && !project.inactive)
       .filter((project) => {
         if (!applyTagFilter || !selectedTags || selectedTags.size === 0) return true;
         return project.tags.some((tag) => selectedTags.has(tag));
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  function formatValidationValue(value) {
-    if (value === null || value === undefined) return "none";
-    if (value === "") return "blank";
-    if (typeof value === "boolean") return value ? "yes" : "no";
-    return String(value);
-  }
-
-  function describeTaskValidationMismatch(localTask, remoteTask) {
-    const differences = [];
-
-    if (localTask.name !== remoteTask.name) {
-      differences.push('name (local "' + formatValidationValue(localTask.name) + '", server "' + formatValidationValue(remoteTask.name) + '")');
-    }
-    if (localTask.description !== remoteTask.description) {
-      differences.push('description (local "' + formatValidationValue(localTask.description) + '", server "' + formatValidationValue(remoteTask.description) + '")');
-    }
-    if (localTask.dueDate !== remoteTask.dueDate) {
-      differences.push("due date (local " + formatValidationValue(localTask.dueDate) + ", server " + formatValidationValue(remoteTask.dueDate) + ")");
-    }
-    if (localTask.source !== remoteTask.source) {
-      differences.push("source (local " + formatValidationValue(localTask.source) + ", server " + formatValidationValue(remoteTask.source) + ")");
-    }
-    if (localTask.generatedKey !== remoteTask.generatedKey) {
-      differences.push("generated key");
-    }
-    if (!!localTask.pinned !== !!remoteTask.pinned) {
-      differences.push("pinned flag");
-    }
-    if (!!localTask.endOfDay !== !!remoteTask.endOfDay) {
-      differences.push("end-of-day flag");
-    }
-
-    return differences;
-  }
-
-  function pushValidationIssue(issues, sectionKey, label, detail, projectName, metadata) {
-    const issue = {
-      sectionKey,
-      label,
-      detail,
-      projectName: projectName || "",
-    };
-    if (metadata && isPlainObject(metadata)) {
-      Object.keys(metadata).forEach((key) => {
-        issue[key] = metadata[key];
-      });
-    }
-    issues.push(issue);
-  }
-
-  function compareProjectActiveTasks(localProject, remoteProject, issues, projectId) {
-    const projectName = (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId;
-
-    if (!localProject && remoteProject) {
-      pushValidationIssue(issues, "missingLocal", projectName, "Project exists on the server only.", "", {
-        kind: "project",
-        projectId,
-      });
-      return;
-    }
-
-    if (localProject && !remoteProject) {
-      pushValidationIssue(issues, "missingRemote", projectName, "Project exists on this device only.", "", {
-        kind: "project",
-        projectId,
-      });
-      return;
-    }
-
-    if (!localProject || !remoteProject) return;
-
-    if (localProject.name !== remoteProject.name) {
-      pushValidationIssue(
-        issues,
-        "mismatch",
-        projectName,
-        'Project name differs (local "' + formatValidationValue(localProject.name) + '", server "' + formatValidationValue(remoteProject.name) + '").',
-        "",
-        {
-          kind: "project",
-          projectId,
-        }
-      );
-    }
-
-    const allTaskIds = new Set(Object.keys(localProject.tasks || {}).concat(Object.keys(remoteProject.tasks || {})));
-    Array.from(allTaskIds)
-      .sort((a, b) => {
-        const localTaskA = (localProject.tasks || {})[a];
-        const remoteTaskA = (remoteProject.tasks || {})[a];
-        const localTaskB = (localProject.tasks || {})[b];
-        const remoteTaskB = (remoteProject.tasks || {})[b];
-        const labelA = (localTaskA && localTaskA.name) || (remoteTaskA && remoteTaskA.name) || a;
-        const labelB = (localTaskB && localTaskB.name) || (remoteTaskB && remoteTaskB.name) || b;
-        return String(labelA).localeCompare(String(labelB));
-      })
-      .forEach((taskId) => {
-        const localTask = (localProject.tasks || {})[taskId];
-        const remoteTask = (remoteProject.tasks || {})[taskId];
-        const label = (localTask && localTask.name) || (remoteTask && remoteTask.name) || taskId;
-
-        if (!localTask && remoteTask) {
-          pushValidationIssue(issues, "missingLocal", label, "Active task exists on the server only.", projectName, {
-            kind: "task",
-            projectId,
-            taskId,
-            archived: false,
-          });
-          return;
-        }
-
-        if (localTask && !remoteTask) {
-          pushValidationIssue(issues, "missingRemote", label, "Active task exists on this device only.", projectName, {
-            kind: "task",
-            projectId,
-            taskId,
-            archived: false,
-          });
-          return;
-        }
-
-        const differences = describeTaskValidationMismatch(localTask, remoteTask);
-        if (!differences.length) return;
-        pushValidationIssue(issues, "mismatch", label, "Active task differs: " + differences.join("; ") + ".", projectName, {
-          kind: "task",
-          projectId,
-          taskId,
-          archived: false,
-        });
-      });
-  }
-
-  function canResolveValidationIssue(issue) {
-    return !!(
-      issue &&
-      (issue.sectionKey === "missingLocal" || issue.sectionKey === "missingRemote" || issue.sectionKey === "mismatch") &&
-      issue.projectId &&
-      (issue.kind === "project" || issue.kind === "task")
-    );
-  }
-
-  function buildValidationResultsHtml(issues, successMessage, includeActions) {
-    if (!issues.length) {
-      return '<div class="resync-in-sync">&#10003; ' + escapeHtml(successMessage) + "</div>";
-    }
-
-    const lines = [];
-    const sections = [
-      {
-        key: "unavailable",
-        title: "Validation could not run",
-        badgeClass: "validation-section-badge-unavailable",
-      },
-      {
-        key: "missingLocal",
-        title: "Exists on the server only",
-        badgeClass: "resync-section-badge-remote",
-      },
-      {
-        key: "missingRemote",
-        title: "Exists on this device only",
-        badgeClass: "resync-section-badge-local",
-      },
-      {
-        key: "mismatch",
-        title: "Exists on both sides but differs",
-        badgeClass: "validation-section-badge-error",
-      },
-    ];
-
-    sections.forEach((section) => {
-      const entries = [];
-      issues.forEach((issue, index) => {
-        if (issue.sectionKey === section.key) {
-          entries.push({ issue, index });
-        }
-      });
-      if (!entries.length) return;
-
-      lines.push('<div class="resync-section">');
-      lines.push(
-        '<div class="resync-section-heading">' +
-          '<span class="resync-section-badge ' + section.badgeClass + '">' + entries.length + "</span>" +
-          escapeHtml(section.title) +
-        "</div>"
-      );
-      lines.push('<ul class="resync-item-list">');
-      entries.forEach((entry) => {
-        const item = entry.issue;
-        const issueIndex = Number.isInteger(entry.index) && entry.index >= 0 ? entry.index : -1;
-        const actionable = includeActions && canResolveValidationIssue(item) && issueIndex >= 0;
-        const meta = item.projectName
-          ? escapeHtml(item.detail) + " — " + escapeHtml(item.projectName)
-          : escapeHtml(item.detail);
-        lines.push('<li class="resync-item">');
-        lines.push('<div class="resync-item-main">');
-        lines.push('<span class="resync-item-name">' + escapeHtml(item.label) + "</span>");
-        lines.push('<span class="resync-item-meta">' + meta + "</span>");
-        lines.push("</div>");
-        if (actionable) {
-          lines.push('<div class="resync-item-actions">');
-          lines.push(
-            '<button type="button" class="btn-secondary resync-item-action-btn" data-validation-action="match-local-to-server" data-validation-index="' +
-              issueIndex +
-              '">Match local to server</button>'
-          );
-          lines.push(
-            '<button type="button" class="btn-secondary resync-item-action-btn" data-validation-action="update-server-from-local" data-validation-index="' +
-              issueIndex +
-              '">Update server from local</button>'
-          );
-          lines.push("</div>");
-        }
-        lines.push("</li>");
-      });
-      lines.push("</ul>");
-      lines.push("</div>");
-    });
-
-    return lines.join("\n");
-  }
-
-  let pendingResyncRemoteState = null;
-  let pendingValidationRemoteState = null;
-  let pendingValidationIssues = [];
-  let pendingValidationMode = null;
-
-  function buildResyncDiffHtml(diff) {
-    const { remoteNewer, localNewer } = diff;
-    const total = remoteNewer.length + localNewer.length;
-
-    if (total === 0) {
-      return '<div class="resync-in-sync">&#10003; Everything is in sync — no differences found.</div>';
-    }
-
-    const lines = [];
-
-    function renderSection(items, title, badgeClass) {
-      if (!items.length) return;
-      lines.push('<div class="resync-section">');
-      lines.push(
-        '<div class="resync-section-heading">' +
-        '<span class="resync-section-badge ' + badgeClass + '">' + items.length + '</span>' +
-        escapeHtml(title) +
-        "</div>"
-      );
-      lines.push('<ul class="resync-item-list">');
-      items.forEach((item) => {
-        lines.push('<li class="resync-item">');
-        lines.push('<div class="resync-item-main">');
-        lines.push('<span class="resync-item-name">' + escapeHtml(item.label) + "</span>");
-        const meta = item.projectName
-          ? escapeHtml(item.detail) + " &mdash; " + escapeHtml(item.projectName)
-          : escapeHtml(item.detail);
-        lines.push('<span class="resync-item-meta">' + meta + "</span>");
-        lines.push("</div>");
-        if (item.discardLocalOnly && item.projectId) {
-          const kind = item.kind === "project" ? "project" : "task";
-          lines.push(
-            '<button type="button" class="btn-secondary resync-item-action-btn" data-resync-action="discard-local" data-item-kind="' +
-              kind +
-              '" data-project-id="' +
-              escapeHtml(item.projectId) +
-              '" data-task-id="' +
-              escapeHtml(item.taskId || "") +
-              '" data-archived="' +
-              (item.archived ? "1" : "0") +
-              '">Discard local</button>'
-          );
-        }
-        lines.push("</li>");
-      });
-      lines.push("</ul>");
-      lines.push("</div>");
-    }
-
-    renderSection(remoteNewer, "Remote is newer — local will receive these changes", "resync-section-badge-remote");
-    renderSection(localNewer, "Local is newer — remote will receive these changes", "resync-section-badge-local");
-
-    return lines.join("\n");
-  }
-
-  function refreshResyncModalDiff(remoteState) {
-    const statusEl = $("#resync-status-text");
-    const diffEl = $("#resync-diff");
-    const confirmBtn = $("#confirm-resync-btn");
-    const pullRemoteBtn = $("#pull-remote-resync-btn");
-
-    const diff = diffLocalRemote(appState, remoteState);
-    const total = diff.remoteNewer.length + diff.localNewer.length;
-
-    if (total === 0) {
-      statusEl.textContent = "No differences found between local and remote state.";
-      confirmBtn.classList.add("hidden");
-      pullRemoteBtn.classList.add("hidden");
-    } else {
-      statusEl.textContent =
-        "Found " + total + " difference" + (total === 1 ? "" : "s") + ". " +
-        "Use Discard local for locally-only items, Sync both sides to merge changes, or Pull remote only to discard local differences and make local state exactly match remote.";
-      confirmBtn.classList.remove("hidden");
-      pullRemoteBtn.classList.remove("hidden");
-    }
-
-    diffEl.innerHTML = buildResyncDiffHtml(diff);
-  }
-
-  function escapeHtml(str) {
-    return String(str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  function showValidationModal(title, statusText, resultsHtml) {
-    const titleEl = $("#validation-title-text");
-    const statusEl = $("#validation-status-text");
-    const resultsEl = $("#validation-results");
-    if (titleEl) titleEl.textContent = title;
-    if (statusEl) statusEl.textContent = statusText;
-    if (resultsEl) resultsEl.innerHTML = resultsHtml || "";
-    $("#validation-modal").classList.remove("hidden");
-    $("#validation-modal").setAttribute("aria-hidden", "false");
-  }
-
-  function closeValidationModal() {
-    pendingValidationRemoteState = null;
-    pendingValidationIssues = [];
-    pendingValidationMode = null;
-    $("#validation-modal").classList.add("hidden");
-    $("#validation-modal").setAttribute("aria-hidden", "true");
-  }
-
-  function clearValidationActionState() {
-    pendingValidationRemoteState = null;
-    pendingValidationIssues = [];
-    pendingValidationMode = null;
-  }
-
-  function cloneStateValue(value) {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-    if (Array.isArray(value)) {
-      return value.map((item) => cloneStateValue(item));
-    }
-    if (isPlainObject(value)) {
-      const cloned = {};
-      Object.keys(value).forEach((key) => {
-        cloned[key] = cloneStateValue(value[key]);
-      });
-      return cloned;
-    }
-    return value;
-  }
-
-  function removeLocalProjectState(projectId, timestamp) {
-    if (!appState.projects[projectId]) return false;
-    appState.deletedProjects[projectId] = timestamp;
-    delete appState.projects[projectId];
-    delete projectConfigTexts[projectId];
-    delete projectConfigs[projectId];
-    saveLocalProjectConfigs();
-    deleteProjectConfigFromDb(projectId);
-    delete recurringTaskDescriptions[projectId];
-    saveLocalRecurringTaskDescriptions();
-    if (currentProjectId === projectId) {
-      currentProjectId = null;
-    }
-    if (appState.defaultProjectId === projectId) {
-      appState.defaultProjectId = null;
-      appState.defaultProjectUpdatedAt = timestamp;
-    }
-    if (hiddenProjectIds.has(projectId)) {
-      hiddenProjectIds.delete(projectId);
-      saveHiddenProjects();
-    }
-    appState.updatedAt = timestamp;
-    return true;
-  }
-
-  function removeLocalTaskState(projectId, taskId, archived, timestamp) {
-    const projectState = appState.projects[projectId];
-    if (!projectState) return false;
-    if (archived) {
-      if (!projectState.archived[taskId]) return false;
-      projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
-      projectState.deletedArchivedTasks[taskId] = timestamp;
-      delete projectState.archived[taskId];
-    } else {
-      if (!projectState.tasks[taskId]) return false;
-      projectState.deletedTasks = projectState.deletedTasks || {};
-      projectState.deletedTasks[taskId] = timestamp;
-      delete projectState.tasks[taskId];
-    }
-    touchProject(projectState, timestamp);
-    deleteTaskDescription(projectId, taskId);
-    return true;
-  }
-
-  function applyValidationIssueAction(issue, action) {
-    if (!canResolveValidationIssue(issue) || !pendingValidationRemoteState) return false;
-    const timestamp = nowIso();
-    const normalizedRemoteState = normalizeState(pendingValidationRemoteState);
-    const remoteProject = normalizedRemoteState.projects[issue.projectId];
-    const localProject = appState.projects[issue.projectId];
-    const archived = !!issue.archived;
-    let changed = false;
-    let requiresPush = action === "update-server-from-local";
-
-    if (issue.kind === "project") {
-      if (action === "match-local-to-server") {
-        if (issue.sectionKey === "missingRemote") {
-          changed = removeLocalProjectState(issue.projectId, timestamp);
-        } else if ((issue.sectionKey === "missingLocal" || issue.sectionKey === "mismatch") && remoteProject) {
-          appState.projects[issue.projectId] = cloneStateValue(remoteProject);
-          delete appState.deletedProjects[issue.projectId];
-          appState.updatedAt = timestamp;
-          changed = true;
-        }
-      } else if (action === "update-server-from-local") {
-        if (issue.sectionKey === "missingLocal") {
-          appState.deletedProjects[issue.projectId] = timestamp;
-          appState.updatedAt = timestamp;
-          changed = true;
-        } else if (localProject) {
-          delete appState.deletedProjects[issue.projectId];
-          touchProject(localProject, timestamp);
-          changed = true;
-        }
-      }
-    } else if (issue.kind === "task") {
-      const remoteTask = remoteProject
-        ? archived
-          ? (remoteProject.archived || {})[issue.taskId]
-          : (remoteProject.tasks || {})[issue.taskId]
-        : null;
-      if (action === "match-local-to-server") {
-        if (issue.sectionKey === "missingRemote") {
-          changed = removeLocalTaskState(issue.projectId, issue.taskId, archived, timestamp);
-        } else if ((issue.sectionKey === "missingLocal" || issue.sectionKey === "mismatch") && remoteTask) {
-          if (!appState.projects[issue.projectId]) return false;
-          const projectState = appState.projects[issue.projectId];
-          if (archived) {
-            projectState.archived = projectState.archived || {};
-            projectState.archived[issue.taskId] = cloneStateValue(remoteTask);
-            if (projectState.deletedArchivedTasks) {
-              delete projectState.deletedArchivedTasks[issue.taskId];
-            }
-          } else {
-            projectState.tasks = projectState.tasks || {};
-            projectState.tasks[issue.taskId] = cloneStateValue(remoteTask);
-            if (projectState.deletedTasks) {
-              delete projectState.deletedTasks[issue.taskId];
-            }
-          }
-          touchProject(projectState, timestamp);
-          changed = true;
-        }
-      } else if (action === "update-server-from-local") {
-        if (issue.sectionKey === "missingLocal") {
-          if (!localProject) return false;
-          if (archived) {
-            localProject.deletedArchivedTasks = localProject.deletedArchivedTasks || {};
-            localProject.deletedArchivedTasks[issue.taskId] = timestamp;
-          } else {
-            localProject.deletedTasks = localProject.deletedTasks || {};
-            localProject.deletedTasks[issue.taskId] = timestamp;
-          }
-          touchProject(localProject, timestamp);
-          changed = true;
-        } else if (localProject) {
-          const localTask = archived
-            ? (localProject.archived || {})[issue.taskId]
-            : (localProject.tasks || {})[issue.taskId];
-          if (!localTask) return false;
-          localTask.updatedAt = timestamp;
-          touchProject(localProject, timestamp);
-          changed = true;
-        }
-      }
-    }
-
-    return changed ? { changed: true, requiresPush } : false;
-  }
-
-  async function rerunPendingValidation() {
-    if (pendingValidationMode === "current") {
-      await validateCurrentProjectState();
-      return;
-    }
-    if (pendingValidationMode === "visible") {
-      await validateVisibleProjectsState();
-      return;
-    }
-    clearValidationActionState();
-  }
-
-  function refreshValidationActionButtons() {
-    const matchAllBtn = $("#validation-match-local-all-btn");
-    const updateAllBtn = $("#validation-update-server-all-btn");
-    if (!matchAllBtn || !updateAllBtn) return;
-    const actionableCount = pendingValidationIssues.filter(canResolveValidationIssue).length;
-    if (!pendingValidationRemoteState || actionableCount === 0) {
-      matchAllBtn.classList.add("hidden");
-      updateAllBtn.classList.add("hidden");
-    } else {
-      matchAllBtn.classList.remove("hidden");
-      updateAllBtn.classList.remove("hidden");
-    }
-  }
-
-  async function handleValidationIssueAction(action, issueIndexes) {
-    if (!pendingValidationRemoteState || !issueIndexes.length) return;
-    const closeBtn = $("#close-validation-btn");
-    const matchAllBtn = $("#validation-match-local-all-btn");
-    const updateAllBtn = $("#validation-update-server-all-btn");
-    const shouldPush = action === "update-server-from-local";
-    let changed = false;
-
-    if (closeBtn) closeBtn.disabled = true;
-    if (matchAllBtn) matchAllBtn.disabled = true;
-    if (updateAllBtn) updateAllBtn.disabled = true;
-
-    try {
-      issueIndexes.forEach((index) => {
-        const issue = pendingValidationIssues[index];
-        const result = applyValidationIssueAction(issue, action);
-        changed ||= !!result?.changed;
-      });
-      if (changed) {
-        generateTasksForAllProjects();
-        saveStateLocal();
-        renderCurrentScreen();
-        if (shouldPush) {
-          setSyncStatus("Syncing local validation choices to server…");
-          await pushStateGuarded({ forcePull: true });
-        } else {
-          setSyncStatus("Applied local validation changes.");
-        }
-        await rerunPendingValidation();
-      }
-    } finally {
-      if (closeBtn) closeBtn.disabled = false;
-      if (matchAllBtn) matchAllBtn.disabled = false;
-      if (updateAllBtn) updateAllBtn.disabled = false;
-    }
-  }
-
-  async function handleValidationResultsClick(event) {
-    const button = event.target.closest(".resync-item-action-btn");
-    if (!button || !button.hasAttribute("data-validation-action")) return;
-    const action = button.getAttribute("data-validation-action");
-    const issueIndex = parseInt(button.getAttribute("data-validation-index"), 10);
-    if (!Number.isInteger(issueIndex) || issueIndex < 0) return;
-    await handleValidationIssueAction(action, [issueIndex]);
-  }
-
-  async function applyValidationActionToAll(action) {
-    const actionableIndexes = [];
-    pendingValidationIssues.forEach((issue, index) => {
-      if (canResolveValidationIssue(issue)) {
-        actionableIndexes.push(index);
-      }
-    });
-    if (!actionableIndexes.length) return;
-    await handleValidationIssueAction(action, actionableIndexes);
-  }
-
-  async function fetchValidationRemoteState() {
-    if (!currentUser || !supabase) {
-      return {
-        remoteState: null,
-        issues: [
-          {
-            sectionKey: "unavailable",
-            label: "Sign in required",
-            detail: "Sign in to compare this device with the server.",
-            projectName: "",
-          },
-        ],
-      };
-    }
-
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      return {
-        remoteState: null,
-        issues: [
-          {
-            sectionKey: "unavailable",
-            label: "Offline",
-            detail: "Reconnect to the internet, then run validation again.",
-            projectName: "",
-          },
-        ],
-      };
-    }
-
-    try {
-      return {
-        remoteState: await fetchNormalizedRemoteState(),
-        issues: [],
-      };
-    } catch (error) {
-      console.error("Validation fetch exception:", error);
-      return {
-        remoteState: null,
-        issues: [
-          {
-            sectionKey: "unavailable",
-            label: "Server unavailable",
-            detail: "Could not load server state: " + getErrorMessage(error),
-            projectName: "",
-          },
-        ],
-      };
-    }
-  }
-
-  async function validateCurrentProjectState() {
-    clearValidationActionState();
-    const project = currentProjectId ? getProjectMeta(currentProjectId) : null;
-    const title = project ? 'Validate "' + project.name + '"' : "Validate Project";
-    showValidationModal(title, "Checking local state against the server…", "");
-    refreshValidationActionButtons();
-
-    if (!project) {
-      showValidationModal(
-        title,
-        "Validation could not run.",
-        buildValidationResultsHtml(
-          [
-            {
-              sectionKey: "unavailable",
-              label: "No project selected",
-              detail: "Open a project, then run validation again.",
-              projectName: "",
-            },
-          ],
-          "",
-          false
-        )
-      );
-      return;
-    }
-
-    const { remoteState, issues } = await fetchValidationRemoteState();
-    if (!remoteState) {
-      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
-      refreshValidationActionButtons();
-      return;
-    }
-
-    compareProjectActiveTasks(
-      normalizeState(appState).projects[project.id],
-      normalizeState(remoteState).projects[project.id],
-      issues,
-      project.id
-    );
-
-    const successMessage = 'All active tasks in "' + project.name + '" match the server. (Active tasks only — use Validate full sync for a complete comparison.)';
-    const statusText = issues.length
-      ? "Found " + issues.length + " active-task validation issue" + (issues.length === 1 ? "" : "s") + "."
-      : "Active tasks are up to date. (Active tasks only — use Validate full sync for a complete comparison.)";
-    pendingValidationRemoteState = remoteState;
-    pendingValidationIssues = issues.slice();
-    pendingValidationMode = "current";
-    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
-    refreshValidationActionButtons();
-  }
-
-  async function validateVisibleProjectsState() {
-    clearValidationActionState();
-    const localVisibleProjects = getVisibleProjectsForState(appState);
-    const title = "Validate Active Tasks";
-    showValidationModal(title, "Checking visible projects against the server…", "");
-    refreshValidationActionButtons();
-
-    if (!localVisibleProjects.length) {
-      showValidationModal(
-        title,
-        "Validation could not run.",
-        buildValidationResultsHtml(
-          [
-            {
-              sectionKey: "unavailable",
-              label: "No visible projects",
-              detail: "Create or unhide a project, then run validation again.",
-              projectName: "",
-            },
-          ],
-          "",
-          false
-        )
-      );
-      return;
-    }
-
-    const { remoteState, issues } = await fetchValidationRemoteState();
-    if (!remoteState) {
-      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
-      refreshValidationActionButtons();
-      return;
-    }
-
-    const remoteVisibleProjects = getVisibleProjectsForState(remoteState);
-    const localState = normalizeState(appState);
-    const normalizedRemoteState = normalizeState(remoteState);
-    const localVisibleById = new Map(localVisibleProjects.map((project) => [project.id, project]));
-    const remoteVisibleById = new Map(remoteVisibleProjects.map((project) => [project.id, project]));
-    const projectIds = new Set([
-      ...localVisibleProjects.map((project) => project.id),
-      ...remoteVisibleProjects.map((project) => project.id),
-    ]);
-
-    Array.from(projectIds)
-      .sort((a, b) => {
-        const localProjectA = localState.projects[a];
-        const remoteProjectA = normalizedRemoteState.projects[a];
-        const labelA = (localProjectA && localProjectA.name) || (remoteProjectA && remoteProjectA.name) || a;
-        const localProjectB = localState.projects[b];
-        const remoteProjectB = normalizedRemoteState.projects[b];
-        const labelB = (localProjectB && localProjectB.name) || (remoteProjectB && remoteProjectB.name) || b;
-        return String(labelA).localeCompare(String(labelB));
-      })
-      .forEach((projectId) => {
-        const localProject = localVisibleById.get(projectId);
-        const remoteProject = remoteVisibleById.get(projectId);
-
-        if (!localProject && remoteProject) {
-          pushValidationIssue(issues, "missingLocal", remoteProject.name, "Visible project exists on the server only.", "", {
-            kind: "project",
-            projectId,
-          });
-          return;
-        }
-
-        if (localProject && !remoteProject) {
-          pushValidationIssue(issues, "missingRemote", localProject.name, "Visible project exists on this device only.", "", {
-            kind: "project",
-            projectId,
-          });
-          return;
-        }
-
-        compareProjectActiveTasks(localState.projects[projectId], normalizedRemoteState.projects[projectId], issues, projectId);
-      });
-
-    const successMessage = "All visible projects and their active tasks match the server. (Active tasks only — use Validate full sync for a complete comparison.)";
-    const statusText = issues.length
-      ? "Found " + issues.length + " active-task validation issue" + (issues.length === 1 ? "" : "s") + "."
-      : "Active tasks are up to date. (Active tasks only — use Validate full sync for a complete comparison.)";
-    pendingValidationRemoteState = remoteState;
-    pendingValidationIssues = issues.slice();
-    pendingValidationMode = "visible";
-    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
-    refreshValidationActionButtons();
-  }
-
-  // --- Full-state validation ---
-
-  async function fetchRemoteAuxState() {
-    if (!supabase || !currentUser) return null;
-    const userId = currentUser.id;
-    try {
-      const [configsRes, descriptionsRes] = await Promise.all([
-        supabase.schema("todo").from(PROJECTS_TABLE).select("id, config_text").eq("user_id", userId),
-        supabase.schema("todo").from(RECURRING_TASK_DESCRIPTIONS_TABLE).select("project_id, task_name, description").eq("user_id", userId),
-      ]);
-      if (configsRes.error) throw configsRes.error;
-      if (descriptionsRes.error) throw descriptionsRes.error;
-
-      const remoteConfigs = {};
-      (configsRes.data || []).forEach((row) => {
-        if (row.id) remoteConfigs[row.id] = typeof row.config_text === "string" ? row.config_text : "";
-      });
-
-      const remoteDescriptions = {};
-      (descriptionsRes.data || []).forEach((row) => {
-        if (row.project_id && typeof row.task_name === "string" && row.task_name) {
-          if (!remoteDescriptions[row.project_id]) remoteDescriptions[row.project_id] = {};
-          remoteDescriptions[row.project_id][row.task_name] = typeof row.description === "string" ? row.description : "";
-        }
-      });
-
-      return { remoteConfigs, remoteDescriptions };
-    } catch (error) {
-      console.error("fetchRemoteAuxState error:", error);
-      return null;
-    }
-  }
-
-  function canonicalJson(value) {
-    if (value === null || value === undefined) return "null";
-    if (typeof value !== "object") return JSON.stringify(value);
-    if (Array.isArray(value)) {
-      return "[" + value.map(canonicalJson).join(",") + "]";
-    }
-    return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
-  }
-
-  function compareArchivedTasks(localProject, remoteProject, issues, projectId) {
-    const projectName = (localProject && localProject.name) || (remoteProject && remoteProject.name) || projectId;
-    const localArchived = (localProject && localProject.archived) || {};
-    const remoteArchived = (remoteProject && remoteProject.archived) || {};
-    const allIds = new Set(Object.keys(localArchived).concat(Object.keys(remoteArchived)));
-    Array.from(allIds).sort().forEach((taskId) => {
-      const local = localArchived[taskId];
-      const remote = remoteArchived[taskId];
-      const label = (local && local.name) || (remote && remote.name) || taskId;
-      if (!local && remote) {
-        pushValidationIssue(issues, "missingLocal", label, "Archived task exists on the server only.", projectName, {
-          kind: "task", projectId, taskId, archived: true,
-        });
-      } else if (local && !remote) {
-        pushValidationIssue(issues, "missingRemote", label, "Archived task exists on this device only.", projectName, {
-          kind: "task", projectId, taskId, archived: true,
-        });
-      } else {
-        const differences = describeTaskValidationMismatch(local, remote);
-        if (differences.length) {
-          pushValidationIssue(issues, "mismatch", label, "Archived task differs: " + differences.join("; ") + ".", projectName, {
-            kind: "task", projectId, taskId, archived: true,
-          });
-        }
-      }
-    });
-  }
-
-  function compareProjectConfigs(localConfigs, remoteConfigs, issues) {
-    const allIds = new Set(Object.keys(localConfigs).concat(Object.keys(remoteConfigs)));
-    Array.from(allIds).sort().forEach((projectId) => {
-      const local = (localConfigs[projectId] || "").trim();
-      const remote = (remoteConfigs[projectId] || "").trim();
-      if (local !== remote) {
-        pushValidationIssue(issues, "mismatch", "Config for project " + projectId, "Project config text differs.", "", {
-          kind: "project", projectId,
-        });
-      }
-    });
-  }
-
-  function compareRecurringDescriptions(localDescs, remoteDescs, issues) {
-    const allProjectIds = new Set(Object.keys(localDescs).concat(Object.keys(remoteDescs)));
-    Array.from(allProjectIds).sort().forEach((projectId) => {
-      const localByName = localDescs[projectId] || {};
-      const remoteByName = remoteDescs[projectId] || {};
-      const allNames = new Set(Object.keys(localByName).concat(Object.keys(remoteByName)));
-      Array.from(allNames).sort().forEach((taskName) => {
-        const local = typeof localByName[taskName] === "string" ? localByName[taskName] : "";
-        const remote = typeof remoteByName[taskName] === "string" ? remoteByName[taskName] : "";
-        if (local !== remote) {
-          pushValidationIssue(issues, "mismatch", 'Recurring description "' + taskName + '"',
-            'Recurring task description differs (project ' + projectId + ').',
-            "", { kind: "project", projectId });
-        }
-      });
-    });
-  }
-
-  async function validateFullState() {
-    clearValidationActionState();
-    const title = "Validate Full Sync";
-    showValidationModal(title, "Checking full local state against the server…", "");
-    refreshValidationActionButtons();
-
-    const { remoteState, issues } = await fetchValidationRemoteState();
-    if (!remoteState) {
-      showValidationModal(title, "Validation could not run.", buildValidationResultsHtml(issues, "", false));
-      refreshValidationActionButtons();
-      return false;
-    }
-
-    const remoteAux = await fetchRemoteAuxState();
-    if (!remoteAux) {
-      pushValidationIssue(issues, "unavailable", "Auxiliary state unavailable",
-        "Could not load project configs or recurring descriptions from server.", "", {});
-      showValidationModal(title, "Validation could not run (partial fetch).", buildValidationResultsHtml(issues, "", false));
-      refreshValidationActionButtons();
-      return false;
-    }
-
-    const localNorm = normalizeState(appState);
-    const remoteNorm = normalizeState(remoteState);
-
-    // Compare all projects (including hidden/inactive) by iterating both sides.
-    const allProjectIds = new Set(
-      Object.keys(localNorm.projects).concat(Object.keys(remoteNorm.projects))
-    );
-
-    Array.from(allProjectIds).sort((a, b) => {
-      const la = (localNorm.projects[a] && localNorm.projects[a].name) || (remoteNorm.projects[a] && remoteNorm.projects[a].name) || a;
-      const lb = (localNorm.projects[b] && localNorm.projects[b].name) || (remoteNorm.projects[b] && remoteNorm.projects[b].name) || b;
-      return String(la).localeCompare(String(lb));
-    }).forEach((projectId) => {
-      const localProject = localNorm.projects[projectId];
-      const remoteProject = remoteNorm.projects[projectId];
-      // Active tasks (all projects, not just visible)
-      compareProjectActiveTasks(localProject, remoteProject, issues, projectId);
-      // Archived tasks
-      compareArchivedTasks(localProject, remoteProject, issues, projectId);
-    });
-
-    // Compare deleted projects tombstones
-    const allDeletedIds = new Set(
-      Object.keys(localNorm.deletedProjects || {}).concat(Object.keys(remoteNorm.deletedProjects || {}))
-    );
-    Array.from(allDeletedIds).sort().forEach((projectId) => {
-      const local = (localNorm.deletedProjects || {})[projectId];
-      const remote = (remoteNorm.deletedProjects || {})[projectId];
-      if (!local && remote) {
-        pushValidationIssue(issues, "missingLocal", "Deleted project " + projectId,
-          "Project tombstone exists on the server only.", "", { kind: "project", projectId });
-      } else if (local && !remote) {
-        pushValidationIssue(issues, "missingRemote", "Deleted project " + projectId,
-          "Project tombstone exists on this device only.", "", { kind: "project", projectId });
-      }
-    });
-
-    // Compare project configs
-    compareProjectConfigs(projectConfigTexts, remoteAux.remoteConfigs, issues);
-
-    // Compare recurring task descriptions
-    compareRecurringDescriptions(recurringTaskDescriptions, remoteAux.remoteDescriptions, issues);
-
-    const successMessage = "Full state matches the server — all projects, archived tasks, configs and recurring descriptions are in sync.";
-    const statusText = issues.length
-      ? "Found " + issues.length + " full-sync difference" + (issues.length === 1 ? "" : "s") + "."
-      : "Everything is in sync.";
-
-    pendingValidationRemoteState = remoteState;
-    pendingValidationIssues = issues.slice();
-    pendingValidationMode = "visible";
-    showValidationModal(title, statusText, buildValidationResultsHtml(issues, successMessage, true));
-    refreshValidationActionButtons();
-    return issues.length === 0;
-  }
-
-  async function openResyncModal() {
-    if (!currentUser || !supabase) return;
-
-    const statusEl = $("#resync-status-text");
-    const diffEl = $("#resync-diff");
-    const confirmBtn = $("#confirm-resync-btn");
-    const pullRemoteBtn = $("#pull-remote-resync-btn");
-
-    statusEl.textContent = "Checking remote state\u2026";
-    diffEl.innerHTML = "";
-    confirmBtn.classList.add("hidden");
-    pullRemoteBtn.classList.add("hidden");
-    pendingResyncRemoteState = null;
-
-    $("#resync-modal").classList.remove("hidden");
-    $("#resync-modal").setAttribute("aria-hidden", "false");
-
-    if (!navigator.onLine) {
-      statusEl.textContent = "You appear to be offline. Please check your connection and try again.";
-      return;
-    }
-
-    const remoteState = await fetchRemoteStateRaw();
-
-    if (!remoteState) {
-      statusEl.textContent = "Could not reach the server. Please check your connection and try again.";
-      return;
-    }
-
-    pendingResyncRemoteState = remoteState;
-    refreshResyncModalDiff(remoteState);
-  }
-
-  function closeResyncModal() {
-    pendingResyncRemoteState = null;
-    $("#resync-modal").classList.add("hidden");
-    $("#resync-modal").setAttribute("aria-hidden", "true");
-  }
-
-  // --- Stale update gate modal ---
-
-  function openStaleUpdateModal(serverTimestamp) {
-    return new Promise((resolve) => {
-      staleUpdateResolver = resolve;
-      const textEl = $("#stale-update-text");
-      if (textEl) {
-        const serverTime = formatTimestamp(serverTimestamp);
-        const clientTime = lastPulledRemoteStateUpdatedAt
-          ? formatTimestamp(lastPulledRemoteStateUpdatedAt)
-          : "unknown";
-        textEl.textContent =
-          "The server was last updated at " + serverTime + ". " +
-          "Your last sync was at " + clientTime + ". " +
-          "Server has changes since your last sync. What would you like to do?";
-      }
-      const modal = $("#stale-update-modal");
-      if (modal) {
-        modal.classList.remove("hidden");
-        modal.setAttribute("aria-hidden", "false");
-      }
-    });
-  }
-
-  function closeStaleUpdateModal() {
-    const modal = $("#stale-update-modal");
-    if (modal) {
-      modal.classList.add("hidden");
-      modal.setAttribute("aria-hidden", "true");
-    }
-  }
-
-  function resolveStaleUpdate(choice) {
-    closeStaleUpdateModal();
-    if (staleUpdateResolver) {
-      staleUpdateResolver(choice);
-      staleUpdateResolver = null;
-    }
-  }
-
-  async function confirmResync() {
-    if (!pendingResyncRemoteState) {
-      closeResyncModal();
-      return;
-    }
-
-    const confirmBtn = $("#confirm-resync-btn");
-    const cancelBtn = $("#cancel-resync-btn");
-    const pullRemoteBtn = $("#pull-remote-resync-btn");
-    confirmBtn.disabled = true;
-    cancelBtn.disabled = true;
-    pullRemoteBtn.disabled = true;
-
-    setSyncStatus("Resyncing\u2026");
-    appState = mergeStates(appState, pendingResyncRemoteState);
-    generateTasksForAllProjects();
-    saveStateLocal();
-    await pushStateGuarded({ forcePull: true });
-    renderCurrentScreen();
-    setSyncStatus("Resync complete.");
-
-    confirmBtn.disabled = false;
-    cancelBtn.disabled = false;
-    pullRemoteBtn.disabled = false;
-    closeResyncModal();
-  }
-
-  async function pullRemoteOverrideLocal() {
-    if (!pendingResyncRemoteState) {
-      closeResyncModal();
-      return;
-    }
-
-    const confirmBtn = $("#confirm-resync-btn");
-    const cancelBtn = $("#cancel-resync-btn");
-    const pullRemoteBtn = $("#pull-remote-resync-btn");
-    confirmBtn.disabled = true;
-    cancelBtn.disabled = true;
-    pullRemoteBtn.disabled = true;
-
-    setSyncStatus("Pulling remote state\u2026");
-    appState = normalizeState(pendingResyncRemoteState);
-    if (currentProjectId && !appState.projects[currentProjectId]) {
-      currentProjectId = null;
-    }
-    if (appState.defaultProjectId && !appState.projects[appState.defaultProjectId]) {
-      appState.defaultProjectId = null;
-      appState.defaultProjectUpdatedAt = appState.updatedAt;
-    }
-    generateTasksForAllProjects();
-    saveStateLocal();
-    renderCurrentScreen();
-    setSyncStatus("Remote pull complete. Local state now exactly matches remote.");
-
-    confirmBtn.disabled = false;
-    cancelBtn.disabled = false;
-    pullRemoteBtn.disabled = false;
-    closeResyncModal();
-  }
-
-  function discardLocalOnlyResyncItem(event) {
-    const button = event.target.closest(".resync-item-action-btn");
-    if (!button || !pendingResyncRemoteState) return;
-    if (button.getAttribute("data-resync-action") !== "discard-local") return;
-
-    const itemKind = button.getAttribute("data-item-kind");
-    const projectId = button.getAttribute("data-project-id");
-    const taskId = button.getAttribute("data-task-id");
-    const archived = button.getAttribute("data-archived") === "1";
-    const timestamp = nowIso();
-
-    if (!projectId) return;
-
-    if (itemKind === "project") {
-      if (!appState.projects[projectId]) return;
-      appState.deletedProjects[projectId] = timestamp;
-      delete appState.projects[projectId];
-      delete projectConfigTexts[projectId];
-      delete projectConfigs[projectId];
-      saveLocalProjectConfigs();
-      deleteProjectConfigFromDb(projectId);
-      delete recurringTaskDescriptions[projectId];
-      saveLocalRecurringTaskDescriptions();
-      if (currentProjectId === projectId) {
-        currentProjectId = null;
-      }
-      if (appState.defaultProjectId === projectId) {
-        appState.defaultProjectId = null;
-        appState.defaultProjectUpdatedAt = timestamp;
-      }
-      if (hiddenProjectIds.has(projectId)) {
-        hiddenProjectIds.delete(projectId);
-        saveHiddenProjects();
-      }
-      appState.updatedAt = timestamp;
-    } else if (itemKind === "task" && taskId) {
-      const projectState = appState.projects[projectId];
-      if (!projectState) return;
-      if (archived) {
-        if (!projectState.archived[taskId]) return;
-        projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
-        projectState.deletedArchivedTasks[taskId] = timestamp;
-        delete projectState.archived[taskId];
-      } else {
-        if (!projectState.tasks[taskId]) return;
-        projectState.deletedTasks = projectState.deletedTasks || {};
-        projectState.deletedTasks[taskId] = timestamp;
-        delete projectState.tasks[taskId];
-      }
-      touchProject(projectState, timestamp);
-      deleteTaskDescription(projectId, taskId);
-    } else {
-      return;
-    }
-
-    saveStateLocal();
-    renderCurrentScreen();
-    refreshResyncModalDiff(pendingResyncRemoteState);
   }
 
   // --- Task description API (merged into tasks table) ---
@@ -2796,46 +737,6 @@
     }
   }
 
-  async function upsertTaskDescription(projectId, taskId, body) {
-    if (!supabase || !currentUser || !projectId || !taskId) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ body })
-        .eq("project_id", projectId)
-        .eq("id", taskId)
-        .eq("user_id", currentUser.id);
-      if (error) {
-        console.warn("Failed to save task description:", error.message);
-        showServerConnectionIssue(error, "task-description-upsert");
-      }
-    } catch (error) {
-      console.warn("Failed to save task description:", error);
-      showServerConnectionIssue(error, "task-description-upsert");
-    }
-  }
-
-  async function deleteTaskDescription(projectId, taskId) {
-    if (!supabase || !currentUser || !projectId || !taskId) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ body: "" })
-        .eq("project_id", projectId)
-        .eq("id", taskId)
-        .eq("user_id", currentUser.id);
-      if (error) {
-        console.warn("Failed to delete task description:", error.message);
-        showServerConnectionIssue(error, "task-description-delete");
-      }
-    } catch (error) {
-      console.warn("Failed to delete task description:", error);
-      showServerConnectionIssue(error, "task-description-delete");
-    }
-  }
-
   // --------------------------------------------------------
 
   function createId(prefix) {
@@ -2843,98 +744,11 @@
   }
 
   function createStableId(prefix, input) {
-    let hash = 2166136261;
-    const source = String(input || "");
-    for (let index = 0; index < source.length; index += 1) {
-      hash ^= source.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return prefix + "_" + (hash >>> 0).toString(36);
-  }
-
-  function parseWeeklyQualifier(token) {
-    const normalized = String(token || "").trim().toLowerCase();
-    return DAY_ALIASES[normalized] || null;
-  }
-
-  function parseMonthlyQualifier(token) {
-    const value = Number(String(token || "").trim());
-    if (!Number.isInteger(value)) return null;
-    if (value < 1 || value > 31) return null;
-    return value;
-  }
-
-  function parseAnnualQualifier(token) {
-    const parts = String(token || "").trim().split("-");
-    if (parts.length !== 2) return null;
-    const month = Number(parts[0]);
-    const day = Number(parts[1]);
-    if (!Number.isInteger(month) || month < 1 || month > 12) return null;
-    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
-    return { month, day };
-  }
-
-  function parseIntervalQualifier(token) {
-    const match = String(token || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) return null;
-    const year = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10);
-    const day = parseInt(match[3], 10);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    // Reject impossible dates (e.g. February 31st) by round-tripping through Date.
-    const d = new Date(year, month - 1, day);
-    if (d.getFullYear() !== year || d.getMonth() + 1 !== month || d.getDate() !== day) return null;
-    return { year, month, day };
+    return window.TaskPlannerCore.createStableId(prefix, input);
   }
 
   function parseProjectConfig(text) {
-    const rules = [];
-    const lines = String(text || "").split(/\r?\n/);
-
-    lines.forEach((rawLine) => {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) return;
-
-      const match = line.match(TASK_LINE);
-      if (!match) {
-        console.warn("Skipping invalid config line:", rawLine);
-        return;
-      }
-
-      const name = match[1].trim();
-      const frequency = match[2].trim().toLowerCase();
-      const qualifierTokens = match[3]
-        .split(",")
-        .map((part) => part.trim())
-        .filter(Boolean);
-
-      const qualifiers = frequency === "weekly"
-        ? qualifierTokens.map(parseWeeklyQualifier).filter(Boolean)
-        : frequency === "monthly"
-        ? qualifierTokens.map(parseMonthlyQualifier).filter((value) => value !== null)
-        : /^every\d+weeks$/i.test(frequency) || /^every\d+months$/i.test(frequency)
-        ? qualifierTokens.map(parseIntervalQualifier).filter(Boolean)
-        : frequency === "daily" || frequency === "workdays"
-        ? [1]
-        : qualifierTokens.map(parseAnnualQualifier).filter(Boolean);
-
-      if (!name || !qualifiers.length) return;
-
-      // Validate that the interval N is at least 1 for every-N-weeks/months rules.
-      if (/^every(\d+)(?:weeks|months)$/i.test(frequency)) {
-        const intervalMatch = frequency.match(/^every(\d+)/i);
-        if (!intervalMatch || parseInt(intervalMatch[1], 10) < 1) return;
-      }
-
-      rules.push({
-        name,
-        frequency,
-        qualifiers,
-        signature: line.toLowerCase().replace(/\s+/g, ""),
-      });
-    });
-
-    return rules;
+    return window.TaskPlannerCore.parseProjectConfig(text);
   }
 
   function getWeekdayToken(dateKey) {
@@ -2942,64 +756,36 @@
   }
 
   function ruleMatchesDate(rule, dateKey) {
-    if (rule.frequency === "daily") {
-      return true;
-    }
-    if (rule.frequency === "workdays") {
-      const dow = parseDateKey(dateKey).getDay(); // 0=Sun, 6=Sat
-      return dow >= 1 && dow <= 5;
-    }
-    if (rule.frequency === "weekly") {
-      return rule.qualifiers.indexOf(getWeekdayToken(dateKey)) >= 0;
-    }
-    if (rule.frequency === "monthly") {
-      return rule.qualifiers.indexOf(parseDateKey(dateKey).getDate()) >= 0;
-    }
-    if (/^every\d+weeks$/i.test(rule.frequency)) {
-      const n = parseInt(rule.frequency.match(/\d+/)[0], 10);
-      const ref = rule.qualifiers[0];
-      if (!ref) return false;
-      const refDate = new Date(ref.year, ref.month - 1, ref.day);
-      const checkDate = parseDateKey(dateKey);
-      const diffMs = checkDate - refDate;
-      if (diffMs < 0) return false;
-      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-      return diffDays % (n * 7) === 0;
-    }
-    if (/^every\d+months$/i.test(rule.frequency)) {
-      const n = parseInt(rule.frequency.match(/\d+/)[0], 10);
-      const ref = rule.qualifiers[0];
-      if (!ref) return false;
-      const checkDate = parseDateKey(dateKey);
-      if (checkDate.getDate() !== ref.day) return false;
-      const monthDiff = (checkDate.getFullYear() - ref.year) * 12 + (checkDate.getMonth() + 1 - ref.month);
-      return monthDiff >= 0 && monthDiff % n === 0;
-    }
-    // annual
-    const date = parseDateKey(dateKey);
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    return rule.qualifiers.some((q) => q.month === month && q.day === day);
+    return window.TaskPlannerCore.ruleMatchesDate(rule, dateKey);
   }
 
   // --- Project config local cache ---
 
   function loadLocalProjectConfigs() {
+    const storageKey = getUserStorageKey(PROJECT_CONFIGS_STORAGE_KEY);
+    if (!storageKey) {
+      projectConfigTexts = {};
+      return false;
+    }
     try {
-      const raw = localStorage.getItem(PROJECT_CONFIGS_STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       projectConfigTexts = raw ? JSON.parse(raw) : {};
       if (typeof projectConfigTexts !== "object" || Array.isArray(projectConfigTexts)) {
         projectConfigTexts = {};
       }
+      return !!raw;
     } catch (error) {
       console.warn("Failed to load local project configs:", error);
       projectConfigTexts = {};
+      return false;
     }
   }
 
   function saveLocalProjectConfigs() {
+    const storageKey = getUserStorageKey(PROJECT_CONFIGS_STORAGE_KEY);
+    if (!storageKey) return;
     try {
-      localStorage.setItem(PROJECT_CONFIGS_STORAGE_KEY, JSON.stringify(projectConfigTexts));
+      localStorage.setItem(storageKey, JSON.stringify(projectConfigTexts));
     } catch (error) {
       console.warn("Failed to save local project configs:", error);
     }
@@ -3088,21 +874,30 @@
   // offline use and synced with the `todo.recurring_task_descriptions` table.
 
   function loadLocalRecurringTaskDescriptions() {
+    const storageKey = getUserStorageKey(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
+    if (!storageKey) {
+      recurringTaskDescriptions = {};
+      return false;
+    }
     try {
-      const raw = localStorage.getItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       recurringTaskDescriptions = raw ? JSON.parse(raw) : {};
       if (typeof recurringTaskDescriptions !== "object" || Array.isArray(recurringTaskDescriptions)) {
         recurringTaskDescriptions = {};
       }
+      return !!raw;
     } catch (error) {
       console.warn("Failed to load local recurring task descriptions:", error);
       recurringTaskDescriptions = {};
+      return false;
     }
   }
 
   function saveLocalRecurringTaskDescriptions() {
+    const storageKey = getUserStorageKey(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY);
+    if (!storageKey) return;
     try {
-      localStorage.setItem(RECURRING_TASK_DESCRIPTIONS_STORAGE_KEY, JSON.stringify(recurringTaskDescriptions));
+      localStorage.setItem(storageKey, JSON.stringify(recurringTaskDescriptions));
     } catch (error) {
       console.warn("Failed to save local recurring task descriptions:", error);
     }
@@ -3205,7 +1000,6 @@
         name: project.name,
         tags: normalizeTagList(project.tags),
         hasConfig: !!(projectConfigs[project.id] && projectConfigs[project.id].length > 0),
-        hidden: project.hidden,
       }));
   }
 
@@ -3265,76 +1059,62 @@
     return projectState;
   }
 
-  function generateTasksForProject(projectId) {
+  function buildRecurringGenerationRequest(projectId) {
     const rules = projectConfigs[projectId];
-    if (!rules || !rules.length) return { created: 0, changed: false };
+    const projectState = appState.projects[projectId];
+    if (!rules || !rules.length || !projectState || projectState.inactive) return null;
 
-    const projectState = ensureProjectState(projectId, "");
     const horizonStart = todayKey();
     const horizonEnd = addDays(horizonStart, 6);
     const rangeStart = projectState.lastGeneratedThrough && compareDateKeys(projectState.lastGeneratedThrough, horizonStart) < 0
       ? addDays(projectState.lastGeneratedThrough, 1)
       : horizonStart;
-
-    let created = 0;
-    let changed = false;
+    const candidates = [];
 
     enumerateDateKeys(rangeStart, horizonEnd).forEach((dateKey) => {
       rules.forEach((rule) => {
         if (!ruleMatchesDate(rule, dateKey)) return;
-
         const generatedKey = projectId + "|" + rule.signature + "|" + dateKey;
         if (projectState.generatedOccurrences[generatedKey]) return;
-
-        const timestamp = nowIso();
-        const taskId = createStableId("task", generatedKey);
-        const defaultDescription = getRecurringTaskDefaultDescription(projectId, rule.name);
-        projectState.tasks[taskId] = {
-          id: taskId,
-          projectId,
+        candidates.push({
+          id: createStableId("task", generatedKey),
           name: rule.name,
-          description: defaultDescription,
-          dueDate: dateKey,
-          source: "generated",
-          generatedKey,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          completedAt: null,
-        };
-        projectState.generatedOccurrences[generatedKey] = {
-          createdAt: timestamp,
-          taskId,
-          dueDate: dateKey,
-          taskName: rule.name,
-        };
-        touchProject(projectState, timestamp);
-        created += 1;
-        changed = true;
+          body: getRecurringTaskDefaultDescription(projectId, rule.name),
+          due_date: dateKey,
+          generated_key: generatedKey,
+        });
       });
     });
 
-    if (projectState.lastGeneratedThrough !== horizonEnd) {
-      touchProject(projectState);
-      projectState.lastGeneratedThrough = horizonEnd;
-      changed = true;
-    }
-
-    return { created, changed };
+    return {
+      projectId,
+      generatedThrough: horizonEnd,
+      candidates,
+      changed: candidates.length > 0 || projectState.lastGeneratedThrough !== horizonEnd,
+    };
   }
 
-  function generateTasksForAllProjects() {
-    let created = 0;
-    let changed = false;
+  async function submitGenerationRequests(requests) {
+    for (const request of requests) {
+      const result = await supabase.schema("todo").rpc("generate_recurring_tasks", {
+        p_project_id: request.projectId,
+        p_generated_through: request.generatedThrough,
+        p_candidates: request.candidates,
+      });
+      if (result.error) return result;
+    }
+    return { error: null };
+  }
 
-    Object.keys(projectConfigs).forEach((projectId) => {
-      const projectState = appState.projects[projectId];
-      if (projectState && projectState.inactive) return;
-      const result = generateTasksForProject(projectId);
-      created += result.created;
-      changed = changed || result.changed;
-    });
-
-    return { created, changed };
+  async function generateTasksForProjectsOnServer(projectIds) {
+    const requests = projectIds
+      .map(buildRecurringGenerationRequest)
+      .filter((request) => request && request.changed);
+    if (!requests.length) {
+      setSyncStatus("No new tasks were needed.");
+      return true;
+    }
+    return runServerCommand("Generating recurring tasks on server...", () => submitGenerationRequests(requests));
   }
 
   function getProjectState(projectId) {
@@ -3442,6 +1222,7 @@
   }
 
   let toastTimer = null;
+  let modalReturnFocus = null;
 
   function showToast(message) {
     let toast = document.getElementById("app-toast");
@@ -3461,13 +1242,70 @@
     }, TOAST_DISPLAY_MS);
   }
 
-  function isOnline() {
+  function getModalFocusableElements(modal) {
+    return Array.from(modal.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter((element) => !element.closest(".hidden"));
+  }
+
+  function openModal(modalId, initialFocusSelector) {
+    const modal = $("#" + modalId);
+    if (!modal) return;
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    const initialFocus = initialFocusSelector ? modal.querySelector(initialFocusSelector) : null;
+    const focusTarget = initialFocus || getModalFocusableElements(modal)[0];
+    if (focusTarget) requestAnimationFrame(() => focusTarget.focus());
+  }
+
+  function closeModal(modalId) {
+    const modal = $("#" + modalId);
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    if (modalReturnFocus && document.contains(modalReturnFocus)) {
+      modalReturnFocus.focus();
+    }
+    modalReturnFocus = null;
+  }
+
+  function handleModalKeydown(event) {
+    const modal = document.querySelector(".modal:not(.hidden)");
+    if (!modal) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (modal.id === "config-modal") closeConfigModal();
+      else if (modal.id === "add-task-modal") closeAddTaskModal();
+      else if (modal.id === "edit-modal") closeEditModal();
+      else if (modal.id === "defer-modal") closeDeferModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = getModalFocusableElements(modal);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function hasNetworkConnection() {
     return typeof navigator !== "undefined" ? navigator.onLine !== false : true;
+  }
+
+  function isOnline() {
+    return appMode === "online";
   }
 
   function isOfflineModeExpected() {
     if (!currentUser || !supabase) return true;
-    return !isOnline();
+    return appMode !== "online";
   }
 
   /**
@@ -3475,17 +1313,54 @@
    * Returns true if the app is currently offline (caller should abort).
    */
   function guardOffline() {
-    if (!isOnline()) {
+    if (appMode !== "online") {
       showToast("You are offline. Edits are unavailable until you reconnect.");
+      return true;
+    }
+    if (serverCommandInFlight) {
+      showToast("Please wait for the current server update to finish.");
       return true;
     }
     return false;
   }
 
+  async function runServerCommand(statusMessage, command) {
+    if (guardOffline() || !currentUser || !supabase) return false;
+    serverCommandInFlight = true;
+    setSyncStatus(statusMessage);
+    updateMutationButtonsForOffline();
+
+    try {
+      const result = await command();
+      if (result && result.error) throw result.error;
+
+      const pulled = await pullState();
+      if (!pulled) throw new Error("The server update completed, but the refreshed state could not be loaded.");
+      await fetchAllProjectConfigsFromDb();
+      await fetchAllRecurringTaskDescriptionsFromDb();
+      rebuildProjectConfigs();
+      renderCurrentScreen();
+      setSyncStatus("Saved to server.");
+      return true;
+    } catch (error) {
+      console.error("Server command failed:", error);
+      showServerConnectionIssue(error, "server-command");
+      if (appMode === "online") {
+        setSyncStatus("Server update failed. No local change was saved.");
+        showToast("Server update failed. No changes were made.");
+      }
+      renderCurrentScreen();
+      return false;
+    } finally {
+      serverCommandInFlight = false;
+      updateMutationButtonsForOffline();
+    }
+  }
+
   function updateOfflineBanner() {
     const banner = $("#offline-banner");
     if (!banner) return;
-    if (!isOnline()) {
+    if (appMode === "offline-readonly") {
       banner.classList.remove("hidden");
     } else {
       banner.classList.add("hidden");
@@ -3515,14 +1390,15 @@
   }
 
   function showServerConnectionIssue(error, source) {
-    if (isOfflineModeExpected()) return;
     if (!isServerConnectionError(error)) return;
 
-    setSyncStatus("Could not reach the server. Changes are saved locally and will retry.");
+    appMode = "offline-readonly";
+    updateOfflineBanner();
+    setSyncStatus("Could not reach the server. Showing cached data in read-only mode.");
 
     const now = Date.now();
     if (now - lastServerErrorToastAt >= SERVER_ERROR_TOAST_COOLDOWN_MS) {
-      showToast("Could not connect to the server. Working locally for now.");
+      showToast("Could not connect to the server. Cached data is read-only.");
       lastServerErrorToastAt = now;
     }
 
@@ -3621,13 +1497,13 @@
       if (!isOnline()) {
         setSyncStatus("Offline — read-only mode. Reconnect to make changes.");
       } else {
-        setSyncStatus("Signed in. Changes sync to server.");
+        setSyncStatus("Connected. Data is loaded from the server.");
       }
       return;
     }
 
     $("#user-bar").classList.add("hidden");
-    setSyncStatus(supabase ? "Local-only mode. Sign in to sync." : "Local-only mode. Add Supabase keys to enable sync.");
+    setSyncStatus(supabase ? "Sign in to load your tasks." : "Supabase configuration is required.");
   }
 
   function createChip(text, strongText) {
@@ -3783,15 +1659,7 @@
       homeAddTaskBtn.disabled = offline;
     }
 
-    const showHiddenBtn = $("#show-hidden-projects-btn");
-    if (showHiddenBtn) {
-      const hiddenCount = hiddenProjectIds.size === 0 ? 0 : Array.from(hiddenProjectIds).filter((id) => appState.projects[id] && !appState.projects[id].inactive).length;
-      showHiddenBtn.classList.toggle("hidden", !showProjectActions || (hiddenCount === 0 && !showHiddenProjects));
-      showHiddenBtn.textContent = showHiddenProjects ? "Hide hidden projects" : "Show hidden projects (" + hiddenCount + ")";
-    }
-
     renderHomeSummary(projects);
-    updateValidationButtons(null);
 
     if (!projects.length) {
       emptyState.classList.remove("hidden");
@@ -3809,9 +1677,8 @@
       const projectState = ensureProjectState(project.id, project.name);
       const projectTags = normalizeTagList(projectState.tags);
       const isDefault = appState.defaultProjectId === project.id;
-      const isHidden = project.hidden;
       const card = document.createElement("div");
-      card.className = "project-card" + (isDefault ? " project-card-default" : "") + (isHidden ? " project-card-hidden" : "");
+      card.className = "project-card" + (isDefault ? " project-card-default" : "");
       card.addEventListener("click", () => {
         openProject(project.id);
       });
@@ -3867,41 +1734,17 @@
       });
       topRowActions.appendChild(tagsButton);
 
-      if (isHidden) {
-        const unhideButton = document.createElement("button");
-        unhideButton.type = "button";
-        unhideButton.className = "project-card-unhide";
-        unhideButton.textContent = "Unhide";
-        unhideButton.title = "Unhide this project on this device.";
-        unhideButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          unhideProject(project.id);
-        });
-        topRowActions.appendChild(unhideButton);
-      } else {
-        const hideButton = document.createElement("button");
-        hideButton.type = "button";
-        hideButton.className = "project-card-hide";
-        hideButton.textContent = "Hide";
-        hideButton.title = "Hide this project on this device only. Use 'Show hidden projects' to reveal it again.";
-        hideButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          hideProject(project.id);
-        });
-        topRowActions.appendChild(hideButton);
-
-        const inactiveButton = document.createElement("button");
-        inactiveButton.type = "button";
-        inactiveButton.className = "project-card-inactive";
-        inactiveButton.textContent = "Make inactive";
-        inactiveButton.disabled = offline;
-        inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
-        inactiveButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          makeProjectInactive(project.id);
-        });
-        topRowActions.appendChild(inactiveButton);
-      }
+      const inactiveButton = document.createElement("button");
+      inactiveButton.type = "button";
+      inactiveButton.className = "project-card-inactive";
+      inactiveButton.textContent = "Make inactive";
+      inactiveButton.disabled = offline;
+      inactiveButton.title = "Hide this project from the home screen and pause recurring task generation.";
+      inactiveButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        makeProjectInactive(project.id);
+      });
+      topRowActions.appendChild(inactiveButton);
 
       topRow.appendChild(topRowActions);
 
@@ -3940,97 +1783,70 @@
     }
   }
 
-  function deleteProject(projectId) {
+  async function deleteProject(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
     if (guardOffline()) return;
 
     if (!confirm('Delete project "' + project.name + '" and all its tasks?')) return;
 
-    const deletionTime = nowIso();
-    appState.deletedProjects[projectId] = deletionTime;
-    delete appState.projects[projectId];
-    delete projectConfigTexts[projectId];
-    delete projectConfigs[projectId];
-    saveLocalProjectConfigs();
-    deleteProjectConfigFromDb(projectId);
-
-    if (currentProjectId === projectId) {
-      currentProjectId = null;
-    }
-    if (appState.defaultProjectId === projectId) {
-      appState.defaultProjectId = null;
-      appState.defaultProjectUpdatedAt = deletionTime;
-    }
-    if (hiddenProjectIds.has(projectId)) {
-      hiddenProjectIds.delete(projectId);
-      saveHiddenProjects();
-    }
-    appState.updatedAt = deletionTime;
-    schedulePersist("Saving changes...");
+    const saved = await runServerCommand("Deleting project from server...", async () => {
+      if (appState.defaultProjectId === projectId) {
+        const settingsResult = await supabase.schema("todo").from(USER_SETTINGS_TABLE).update({ default_project_id: null }).eq("user_id", currentUser.id);
+        if (settingsResult.error) return settingsResult;
+      }
+      return supabase.schema("todo").from(PROJECTS_TABLE).delete().eq("user_id", currentUser.id).eq("id", projectId);
+    });
+    if (!saved) return;
+    currentProjectId = null;
     renderHome();
     showScreen("home");
   }
 
-  function makeProjectInactive(projectId) {
+  async function makeProjectInactive(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
     if (guardOffline()) return;
 
-    const projectState = ensureProjectState(projectId, "");
-    projectState.inactive = true;
-    touchProject(projectState);
-
-    if (appState.defaultProjectId === projectId) {
-      appState.defaultProjectId = null;
-      appState.defaultProjectUpdatedAt = appState.updatedAt;
-    }
-
-    schedulePersist("Project set to inactive.");
-    renderHome();
+    await runServerCommand("Setting project inactive on server...", async () => {
+      if (appState.defaultProjectId === projectId) {
+        const settingsResult = await supabase.schema("todo").from(USER_SETTINGS_TABLE).update({ default_project_id: null }).eq("user_id", currentUser.id);
+        if (settingsResult.error) return settingsResult;
+      }
+      return supabase.schema("todo").from(PROJECTS_TABLE).update({ inactive: true }).eq("user_id", currentUser.id).eq("id", projectId);
+    });
   }
 
-  function reactivateProject(projectId) {
+  async function reactivateProject(projectId) {
     if (guardOffline()) return;
-    const projectState = ensureProjectState(projectId, "");
-    projectState.inactive = false;
-    touchProject(projectState);
-
-    const result = generateTasksForProject(projectId);
-    if (result.changed) {
-      schedulePersist(result.created
-        ? "Project reactivated. Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "."
-        : "Project reactivated.");
-    } else {
-      schedulePersist("Project reactivated.");
-    }
-
-    if (getInactiveProjects().length === 0) {
-      renderHome();
-      showScreen("home");
-    } else {
-      renderInactiveProjects();
-    }
+    const saved = await runServerCommand("Reactivating project on server...", () =>
+      supabase.schema("todo").from(PROJECTS_TABLE).update({ inactive: false }).eq("user_id", currentUser.id).eq("id", projectId)
+    );
+    if (saved) await generateTasksForProjectsOnServer([projectId]);
   }
 
-  function setDefaultProject(projectId) {
+  async function setDefaultProject(projectId) {
     if (guardOffline()) return;
-    const timestamp = nowIso();
-    appState.defaultProjectId = projectId;
-    appState.defaultProjectUpdatedAt = timestamp;
-    appState.updatedAt = timestamp;
-    schedulePersist("Default project saved.");
-    renderHome();
+    await runServerCommand("Saving default project on server...", () =>
+      supabase.schema("todo").from(USER_SETTINGS_TABLE).upsert({
+        user_id: currentUser.id,
+        default_project_id: projectId,
+        default_project_updated_at: nowIso(),
+        updated_at: nowIso(),
+      }, { onConflict: "user_id" })
+    );
   }
 
-  function clearDefaultProject() {
+  async function clearDefaultProject() {
     if (guardOffline()) return;
-    const timestamp = nowIso();
-    appState.defaultProjectId = null;
-    appState.defaultProjectUpdatedAt = timestamp;
-    appState.updatedAt = timestamp;
-    schedulePersist("Default project cleared.");
-    renderHome();
+    await runServerCommand("Clearing default project on server...", () =>
+      supabase.schema("todo").from(USER_SETTINGS_TABLE).upsert({
+        user_id: currentUser.id,
+        default_project_id: null,
+        default_project_updated_at: nowIso(),
+        updated_at: nowIso(),
+      }, { onConflict: "user_id" })
+    );
   }
 
   function updateRefreshButtons(project) {
@@ -4045,34 +1861,8 @@
     });
   }
 
-  function updateValidationButtons(project) {
-    const currentProjectButtons = ["#validate-project-btn", "#validate-day-project-btn"];
-    currentProjectButtons.forEach((selector) => {
-      const button = $(selector);
-      if (!button) return;
-      button.disabled = !project;
-      button.title = project
-        ? "Compare this project's active tasks with the server. (Active tasks only — use Validate full sync for archived tasks and configs.)"
-        : "Open a project to validate it.";
-    });
-
-    const homeButton = $("#validate-projects-btn");
-    if (!homeButton) return;
-    const visibleProjects = getVisibleProjectsForState(appState);
-    homeButton.disabled = visibleProjects.length === 0;
-    homeButton.title = visibleProjects.length
-      ? "Compare every visible project's active tasks with the server."
-      : "Create or unhide a project to validate it.";
-
-    const fullSyncButton = $("#validate-full-sync-btn");
-    if (fullSyncButton) {
-      fullSyncButton.disabled = false;
-      fullSyncButton.title = "Compare all projects, archived tasks, project configs and recurring descriptions with the server.";
-    }
-  }
-
   function updateMutationButtonsForOffline() {
-    const offline = !isOnline();
+    const offline = !isOnline() || serverCommandInFlight;
     const mutationSelectors = [
       "#open-project-add-task-btn",
       "#open-day-add-task-btn",
@@ -4370,9 +2160,7 @@
     controls.appendChild(toggle);
 
     if (selectedTaskView === "overdue" && currentProjectId) {
-      const overdueCount = getTaskBuckets(currentProjectId, selectedDate).overdue
-        .filter((task) => !getPendingTaskCompletion(currentProjectId, task.id))
-        .length;
+      const overdueCount = getTaskBuckets(currentProjectId, selectedDate).overdue.length;
       if (overdueCount > 0) {
         const offline = !isOnline();
         const deferAllButton = document.createElement("button");
@@ -4453,10 +2241,7 @@
     if (!task.dueDate) card.classList.add("nodate");
     if (!options.archived && task.pinned) card.classList.add("pinned");
     if (!options.archived && task.endOfDay) card.classList.add("end-of-day");
-    const pendingCompletion = !options.archived && getPendingTaskCompletion(task.projectId, task.id);
-    if (pendingCompletion) card.classList.add("pending-completion");
-    if (pendingCompletion && pendingCompletion.isWarning) card.classList.add("pending-completion-warning");
-    const condensedCard = condensedMode && !options.archived && !pendingCompletion;
+    const condensedCard = condensedMode && !options.archived;
     const expandedInCondensed = condensedCard ? isTaskExpanded(task) : false;
     if (condensedCard && !expandedInCondensed) card.classList.add("condensed");
 
@@ -4573,18 +2358,6 @@
         deleteArchivedTask(task.id);
       });
       actions.appendChild(deleteButton);
-    } else if (pendingCompletion) {
-      actions.classList.add("pending-completion-actions");
-
-      const cancelButton = document.createElement("button");
-      cancelButton.type = "button";
-      cancelButton.className = `task-btn cancel-completion${pendingCompletion.isWarning ? " warning" : ""}`;
-      cancelButton.textContent = "Cancel Completion...";
-      cancelButton.addEventListener("click", () => {
-        cancelTaskCompletion(task.id, task.projectId);
-      });
-
-      actions.appendChild(cancelButton);
     } else {
       const completeButton = document.createElement("button");
       completeButton.type = "button";
@@ -4845,7 +2618,6 @@
     renderDayStrip(project.id);
     renderSummary(project.id);
     updateRefreshButtons(project);
-    updateValidationButtons(project);
     updateMutationButtonsForOffline();
     showScreen("project");
   }
@@ -4886,7 +2658,6 @@
     renderTaskListControls();
     renderTaskSections(project.id);
     updateRefreshButtons(project);
-    updateValidationButtons(project);
     updateMutationButtonsForOffline();
     showScreen("day");
   }
@@ -5041,13 +2812,12 @@
     return getProjectState(currentProjectId).tasks[taskId] || null;
   }
 
-  function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
+  async function addManualTaskFromForm(nameInputId, descriptionInputId, dateInputId) {
     if (guardOffline()) return false;
     const select = $("#add-task-project-select");
     const targetProjectId = (select && select.value) ? select.value : currentProjectId;
     if (!targetProjectId) return false;
 
-    const projectState = ensureProjectState(targetProjectId, "");
     const nameInput = $("#" + nameInputId);
     const descriptionInput = $("#" + descriptionInputId);
     const dateInput = $("#" + dateInputId);
@@ -5060,27 +2830,27 @@
     const taskId = createId("task");
     const dueDate = isDateKey(dateInput.value) ? dateInput.value : null;
 
-    projectState.tasks[taskId] = {
-      id: taskId,
-      projectId: targetProjectId,
-      name,
-      description,
-      dueDate,
-      source: "manual",
-      generatedKey: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      completedAt: null,
-    };
-
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
+    const saved = await runServerCommand("Adding task to server...", () =>
+      supabase.schema("todo").from(TASKS_TABLE).insert({
+        user_id: currentUser.id,
+        project_id: targetProjectId,
+        id: taskId,
+        name,
+        due_date: dueDate,
+        source: "manual",
+        generated_key: null,
+        pinned: false,
+        end_of_day: false,
+        body: description,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+    );
+    if (!saved) return false;
 
     nameInput.value = "";
     descriptionInput.value = "";
     dateInput.value = "";
-
-    renderCurrentScreen();
 
     const targetProjectMeta = getProjectMeta(targetProjectId);
     const targetProjectName = targetProjectMeta ? targetProjectMeta.name : targetProjectId;
@@ -5099,11 +2869,6 @@
         : "Task '" + name + "' created with no due date.";
       showToast(msg);
     }
-
-    // Persist the long description to the dedicated cloud table (fire-and-forget).
-    // Always upsert so that a subsequent edit that clears the description is
-    // guaranteed to have a row to update rather than leaving stale data.
-    upsertTaskDescription(targetProjectId, taskId, description);
 
     return true;
   }
@@ -5139,20 +2904,28 @@
     if (tagsInput) tagsInput.value = "";
   }
 
-  function setProjectTags(projectId, nextTags) {
-    const projectState = ensureProjectState(projectId, "");
+  async function setProjectTags(projectId, nextTags) {
+    const projectState = getProjectState(projectId);
     const normalizedTags = normalizeTagList(nextTags);
     const currentTags = normalizeTagList(projectState.tags);
     if (currentTags.join("|") === normalizedTags.join("|")) {
       return false;
     }
-    projectState.tags = normalizedTags;
-    touchProject(projectState);
-    schedulePersist("Saving changes...");
-    return true;
+    return runServerCommand("Saving project tags on server...", async () => {
+      const deleteResult = await supabase.schema("todo").from(PROJECT_TAGS_TABLE).delete().eq("user_id", currentUser.id).eq("project_id", projectId);
+      if (deleteResult.error || !normalizedTags.length) return deleteResult;
+      const tagsResult = await supabase.schema("todo").from(TAGS_TABLE).upsert(
+        normalizedTags.map((tag) => ({ user_id: currentUser.id, tag })),
+        { onConflict: "user_id,tag" }
+      );
+      if (tagsResult.error) return tagsResult;
+      return supabase.schema("todo").from(PROJECT_TAGS_TABLE).insert(
+        normalizedTags.map((tag) => ({ user_id: currentUser.id, project_id: projectId, tag }))
+      );
+    });
   }
 
-  function promptEditProjectTags(projectId) {
+  async function promptEditProjectTags(projectId) {
     const project = getProjectMeta(projectId);
     if (!project) return;
     if (guardOffline()) return;
@@ -5160,9 +2933,7 @@
     const entered = prompt('Edit tags for "' + project.name + '" (comma separated):', initialValue);
     if (entered === null) return;
     const nextTags = parseTagInput(entered);
-    if (setProjectTags(projectId, nextTags)) {
-      renderCurrentScreen();
-    }
+    await setProjectTags(projectId, nextTags);
   }
 
   function getTagFilteredProjects(projects, selectedTags) {
@@ -5253,7 +3024,7 @@
       : "Showing " + filteredCount + " project" + (filteredCount === 1 ? "" : "s") + " matching selected tags";
   }
 
-  function createManualProject(event) {
+  async function createManualProject(event) {
     event.preventDefault();
     if (guardOffline()) return;
 
@@ -5274,10 +3045,26 @@
     }
 
     const projectId = buildProjectId(name);
-    const projectState = ensureProjectState(projectId, name);
-    projectState.tags = tags;
-    touchProject(projectState);
-    schedulePersist("Saving changes...");
+    const saved = await runServerCommand("Creating project on server...", async () => {
+      const projectResult = await supabase.schema("todo").from(PROJECTS_TABLE).insert({
+        user_id: currentUser.id,
+        id: projectId,
+        name,
+        inactive: false,
+        last_generated_through: null,
+        config_text: "",
+      });
+      if (projectResult.error || !tags.length) return projectResult;
+      const tagsResult = await supabase.schema("todo").from(TAGS_TABLE).upsert(
+        tags.map((tag) => ({ user_id: currentUser.id, tag })),
+        { onConflict: "user_id,tag" }
+      );
+      if (tagsResult.error) return tagsResult;
+      return supabase.schema("todo").from(PROJECT_TAGS_TABLE).insert(
+        tags.map((tag) => ({ user_id: currentUser.id, project_id: projectId, tag }))
+      );
+    });
+    if (!saved) return;
     nameInput.value = "";
     closeCreateProjectPanel();
     openProject(projectId);
@@ -5342,16 +3129,12 @@
     if (rtdErrorEl) { rtdErrorEl.textContent = ""; rtdErrorEl.classList.add("hidden"); }
     refreshRtdTaskNameDropdown();
     renderRecurringTaskDescriptionsList(projectId);
-    $("#config-modal").classList.remove("hidden");
-    $("#config-modal").setAttribute("aria-hidden", "false");
-    const builderName = $("#builder-task-name");
-    if (builderName) builderName.focus();
+    openModal("config-modal", "#builder-task-name");
   }
 
   function closeConfigModal() {
     configModalProjectId = null;
-    $("#config-modal").classList.add("hidden");
-    $("#config-modal").setAttribute("aria-hidden", "true");
+    closeModal("config-modal");
     resetTaskBuilder();
   }
 
@@ -5544,11 +3327,14 @@
     const textarea = $("#config-modal-textarea");
     const errorEl = $("#config-modal-error");
     const configText = textarea ? textarea.value : "";
-    const rules = parseProjectConfig(configText);
+    const parsedConfig = window.TaskPlannerCore.parseProjectConfigDetailed(configText);
+    const rules = parsedConfig.rules;
 
-    if (configText.trim() && !rules.length) {
+    if (parsedConfig.errors.length) {
       if (errorEl) {
-        errorEl.textContent = "No valid task rules found. Each rule must be in the format: task name-daily-daily, task name-workdays-workdays, task name-weekly-day, task name-monthly-dayOfMonth, task name-annual-MM-DD, task name-everyNweeks-YYYY-MM-DD, or task name-everyNmonths-YYYY-MM-DD.";
+        errorEl.textContent = parsedConfig.errors
+          .map((error) => "Line " + error.line + ": " + error.message)
+          .join(" ");
         errorEl.classList.remove("hidden");
       }
       return;
@@ -5560,22 +3346,12 @@
     }
 
     const projectId = configModalProjectId;
-    projectConfigTexts[projectId] = configText;
-    projectConfigs[projectId] = rules;
-    saveLocalProjectConfigs();
-    upsertProjectConfigToDb(projectId, configText);
-
+    const saved = await runServerCommand("Saving project configuration on server...", () =>
+      supabase.schema("todo").from(PROJECTS_TABLE).update({ config_text: configText }).eq("user_id", currentUser.id).eq("id", projectId)
+    );
+    if (!saved) return;
     closeConfigModal();
-
-    const result = generateTasksForProject(projectId);
-    if (result.changed) {
-      schedulePersist(result.created ? "Config saved. Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "." : "Config saved.");
-    } else {
-      setSyncStatus("Config saved.");
-      schedulePersist("Saving changes...");
-    }
-
-    renderCurrentScreen();
+    await generateTasksForProjectsOnServer([projectId]);
   }
 
   async function clearProjectConfig() {
@@ -5584,15 +3360,10 @@
     if (!confirm("Clear the recurring configuration for this project? Existing generated tasks will remain but no new ones will be created.")) return;
 
     const projectId = configModalProjectId;
-    delete projectConfigTexts[projectId];
-    delete projectConfigs[projectId];
-    saveLocalProjectConfigs();
-    deleteProjectConfigFromDb(projectId);
-
-    closeConfigModal();
-    setSyncStatus("Configuration cleared.");
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
+    const saved = await runServerCommand("Clearing project configuration on server...", () =>
+      supabase.schema("todo").from(PROJECTS_TABLE).update({ config_text: "" }).eq("user_id", currentUser.id).eq("id", projectId)
+    );
+    if (saved) closeConfigModal();
   }
 
   // --- Recurring task description UI ---
@@ -5649,7 +3420,7 @@
     });
   }
 
-  function handleAddRecurringTaskDescription() {
+  async function handleAddRecurringTaskDescription() {
     const projectId = configModalProjectId;
     if (!projectId) return;
     if (guardOffline()) return;
@@ -5669,12 +3440,15 @@
       return;
     }
 
-    if (!recurringTaskDescriptions[projectId]) {
-      recurringTaskDescriptions[projectId] = {};
-    }
-    recurringTaskDescriptions[projectId][taskName] = description;
-    saveLocalRecurringTaskDescriptions();
-    upsertRecurringTaskDescriptionToDb(projectId, taskName, description);
+    const saved = await runServerCommand("Saving recurring description on server...", () =>
+      supabase.schema("todo").from(RECURRING_TASK_DESCRIPTIONS_TABLE).upsert({
+        user_id: currentUser.id,
+        project_id: projectId,
+        task_name: taskName,
+        description,
+      }, { onConflict: "user_id,project_id,task_name" })
+    );
+    if (!saved) return;
 
     if (nameInput) nameInput.value = "";
     if (descInput) descInput.value = "";
@@ -5683,142 +3457,76 @@
     if (nameInput) nameInput.focus();
   }
 
-  function handleDeleteRecurringTaskDescription(projectId, taskName) {
+  async function handleDeleteRecurringTaskDescription(projectId, taskName) {
     if (!projectId || !taskName) return;
     if (guardOffline()) return;
-    if (recurringTaskDescriptions[projectId]) {
-      delete recurringTaskDescriptions[projectId][taskName];
-      if (!Object.keys(recurringTaskDescriptions[projectId]).length) {
-        delete recurringTaskDescriptions[projectId];
-      }
-    }
-    saveLocalRecurringTaskDescriptions();
-    deleteRecurringTaskDescriptionFromDb(projectId, taskName);
-    renderRecurringTaskDescriptionsList(projectId);
+    const saved = await runServerCommand("Removing recurring description from server...", () =>
+      supabase
+        .schema("todo")
+        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("task_name", taskName)
+    );
+      if (saved) renderRecurringTaskDescriptionsList(projectId);
   }
 
-  function completeTask(taskId) {
+  async function completeTask(taskId) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[taskId];
-    if (!task) return;
-    if (getPendingTaskCompletion(currentProjectId, taskId)) return;
-
     const projectId = currentProjectId;
-    const pendingKey = buildPendingTaskCompletionKey(projectId, taskId);
-    const warningDelayMs = COMPLETE_DELAY_MS - COMPLETE_WARNING_LEAD_MS;
-    pendingTaskCompletions[pendingKey] = {
-      projectId,
-      taskId,
-      isWarning: false,
-      warningTimeoutId: setTimeout(() => {
-        const pending = pendingTaskCompletions[pendingKey];
-        if (!pending) return;
-        pending.isWarning = true;
-        renderCurrentScreen();
-      }, warningDelayMs),
-      timeoutId: setTimeout(() => {
-        finalizeTaskCompletion(projectId, taskId);
-      }, COMPLETE_DELAY_MS),
-    };
+    const task = getProjectState(projectId).tasks[taskId];
+    if (!task) return;
 
-    renderCurrentScreen();
+    await runServerCommand("Completing task on server...", () =>
+      supabase.schema("todo").rpc("complete_task", {
+        p_project_id: projectId,
+        p_task_id: taskId,
+      })
+    );
   }
 
-  function archiveTask(projectState, taskId, timestamp) {
-    const task = projectState.tasks[taskId];
-    if (!task) return false;
-    delete projectState.tasks[taskId];
-    projectState.archived[taskId] = {
-      ...task,
-      completedAt: timestamp,
-      updatedAt: timestamp,
-    };
-    return true;
-  }
-
-  function completeAllOverdueTasks() {
+  async function completeAllOverdueTasks() {
     if (!currentProjectId) return;
     if (guardOffline()) return;
     const projectId = currentProjectId;
     const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
-      .map((task) => task.id)
-      .filter((taskId) => !getPendingTaskCompletion(projectId, taskId));
+      .map((task) => task.id);
     const totalOverdue = overdueTaskIds.length;
     if (!totalOverdue) return;
 
     if (!confirm(`Are you sure you definitely want to complete all ${totalOverdue} overdue task${totalOverdue === 1 ? "" : "s"} for this project?`)) return;
 
-    const projectState = ensureProjectState(projectId, "");
-    const timestamp = nowIso();
-    let completedCount = 0;
-    overdueTaskIds.forEach((taskId) => {
-      clearPendingTaskCompletion(projectId, taskId);
-      if (archiveTask(projectState, taskId, timestamp)) {
-        completedCount++;
-      }
-    });
-
-    if (!completedCount) return;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
+    await runServerCommand("Completing overdue tasks on server...", () =>
+      supabase.schema("todo").rpc("complete_tasks", {
+        p_project_id: projectId,
+        p_task_ids: overdueTaskIds,
+      })
+    );
   }
 
-  function deferAllOverdueTasksToToday() {
+  async function deferAllOverdueTasksToToday() {
     if (!currentProjectId) return;
     if (guardOffline()) return;
     const projectId = currentProjectId;
     const today = todayKey();
     const overdueTaskIds = getTaskBuckets(projectId, selectedDate).overdue
-      .map((task) => task.id)
-      .filter((taskId) => !getPendingTaskCompletion(projectId, taskId));
+      .map((task) => task.id);
     const totalOverdue = overdueTaskIds.length;
     if (!totalOverdue) return;
 
     if (!confirm(`Are you sure you want to defer all ${totalOverdue} overdue task${totalOverdue === 1 ? "" : "s"} to today for this project?`)) return;
 
-    const projectState = ensureProjectState(projectId, "");
-    const timestamp = nowIso();
-    let deferredCount = 0;
-    overdueTaskIds.forEach((taskId) => {
-      const task = projectState.tasks[taskId];
-      if (!task) return;
-      task.dueDate = today;
-      task.updatedAt = timestamp;
-      deferredCount++;
-    });
-
-    if (!deferredCount) return;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
-  }
-
-  function cancelTaskCompletion(taskId, projectId) {
-    const resolvedProjectId = projectId || currentProjectId;
-    if (!resolvedProjectId) return;
-    if (!clearPendingTaskCompletion(resolvedProjectId, taskId)) return;
-    renderCurrentScreen();
-  }
-
-  function finalizeTaskCompletion(projectId, taskId) {
-    if (!clearPendingTaskCompletion(projectId, taskId)) return;
-
-    const projectState = appState.projects[projectId];
-    if (!projectState) {
-      renderCurrentScreen();
-      return;
-    }
-    const timestamp = nowIso();
-    if (!archiveTask(projectState, taskId, timestamp)) {
-      renderCurrentScreen();
-      return;
-    }
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
+    await runServerCommand("Deferring overdue tasks on server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ due_date: today })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .in("id", overdueTaskIds)
+    );
   }
 
   async function openEditModal(taskId) {
@@ -5830,8 +3538,7 @@
     $("#edit-task-name-input").value = task.name || "";
     $("#edit-task-description-input").value = task.description || "";
     $("#edit-task-date-input").value = task.dueDate || "";
-    $("#edit-modal").classList.remove("hidden");
-    $("#edit-modal").setAttribute("aria-hidden", "false");
+    openModal("edit-modal", "#edit-task-name-input");
 
     // Fetch the authoritative long description from the cloud table.
     // Disable the textarea briefly so the user doesn't type before the
@@ -5851,8 +3558,7 @@
 
   function closeEditModal() {
     editTaskId = null;
-    $("#edit-modal").classList.add("hidden");
-    $("#edit-modal").setAttribute("aria-hidden", "true");
+    closeModal("edit-modal");
   }
 
   function getDefaultAddTaskDate() {
@@ -5882,31 +3588,28 @@
     $("#add-task-description-input").value = "";
     populateAddTaskProjectSelect(resolvedDefaultId);
     configureTaskDateInput("add-task-date-input", getDefaultAddTaskDate());
-    $("#add-task-modal").classList.remove("hidden");
-    $("#add-task-modal").setAttribute("aria-hidden", "false");
-    $("#add-task-name-input").focus();
+    openModal("add-task-modal", "#add-task-name-input");
   }
 
   function closeAddTaskModal() {
-    $("#add-task-modal").classList.add("hidden");
-    $("#add-task-modal").setAttribute("aria-hidden", "true");
+    closeModal("add-task-modal");
   }
 
-  function submitAddTask(event) {
+  async function submitAddTask(event) {
     event.preventDefault();
-    const added = addManualTaskFromForm("add-task-name-input", "add-task-description-input", "add-task-date-input");
+    const added = await addManualTaskFromForm("add-task-name-input", "add-task-description-input", "add-task-date-input");
     if (!added) return;
 
     closeAddTaskModal();
   }
 
-  function saveEditedTask(event) {
+  async function saveEditedTask(event) {
     event.preventDefault();
     if (!currentProjectId || !editTaskId) return;
     if (guardOffline()) return;
 
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[editTaskId];
+    const projectId = currentProjectId;
+    const task = getProjectState(projectId).tasks[editTaskId];
     if (!task) {
       closeEditModal();
       return;
@@ -5919,19 +3622,16 @@
     if (!name) return;
 
     const savedTaskId = editTaskId;
-    const timestamp = nowIso();
-    task.name = name;
-    task.description = description;
-    task.dueDate = dueDate;
-    task.updatedAt = timestamp;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-
-    closeEditModal();
-    renderCurrentScreen();
-
-    // Persist the long description to the dedicated cloud table (fire-and-forget).
-    upsertTaskDescription(currentProjectId, savedTaskId, description);
+    const saved = await runServerCommand("Saving task to server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ name, body: description, due_date: dueDate })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", savedTaskId)
+    );
+    if (saved) closeEditModal();
   }
 
   function formatDeferDateLabel(dateKey) {
@@ -5967,148 +3667,155 @@
     deferTaskId = taskId;
     populateDeferButtons(task);
     $("#defer-task-name").textContent = task.name;
-    $("#defer-modal").classList.remove("hidden");
-    $("#defer-modal").setAttribute("aria-hidden", "false");
+    openModal("defer-modal", ".defer-date-btn");
   }
 
   function closeDeferModal() {
     deferTaskId = null;
-    $("#defer-modal").classList.add("hidden");
-    $("#defer-modal").setAttribute("aria-hidden", "true");
+    closeModal("defer-modal");
   }
 
-  function deferToDate(dateKey) {
+  async function deferToDate(dateKey) {
     if (!currentProjectId || !deferTaskId) return;
     if (guardOffline()) { closeDeferModal(); return; }
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[deferTaskId];
+    const projectId = currentProjectId;
+    const taskId = deferTaskId;
+    const task = getProjectState(projectId).tasks[taskId];
     if (!task) {
       closeDeferModal();
       return;
     }
 
-    const timestamp = nowIso();
-    task.dueDate = dateKey;
-    task.updatedAt = timestamp;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    closeDeferModal();
-    renderDayView();
+    const saved = await runServerCommand("Scheduling task on server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ due_date: dateKey })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
+    if (saved) closeDeferModal();
   }
 
-  function clearDeferDate() {
+  async function clearDeferDate() {
     if (!currentProjectId || !deferTaskId) return;
     if (guardOffline()) { closeDeferModal(); return; }
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[deferTaskId];
+    const projectId = currentProjectId;
+    const taskId = deferTaskId;
+    const task = getProjectState(projectId).tasks[taskId];
     if (!task) {
       closeDeferModal();
       return;
     }
 
-    const timestamp = nowIso();
-    task.dueDate = null;
-    task.updatedAt = timestamp;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    closeDeferModal();
-    renderDayView();
+    const saved = await runServerCommand("Clearing due date on server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ due_date: null })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
+    if (saved) closeDeferModal();
   }
 
-  function togglePinTask(taskId) {
+  async function togglePinTask(taskId) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[taskId];
+    const projectId = currentProjectId;
+    const task = getProjectState(projectId).tasks[taskId];
     if (!task) return;
 
-    const timestamp = nowIso();
-    task.pinned = !task.pinned;
-    if (task.pinned) task.endOfDay = false;
-    task.updatedAt = timestamp;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
+    const pinned = !task.pinned;
+    await runServerCommand("Updating task on server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ pinned, end_of_day: pinned ? false : task.endOfDay })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
   }
 
-  function toggleEndOfDayTask(taskId) {
+  async function toggleEndOfDayTask(taskId) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[taskId];
+    const projectId = currentProjectId;
+    const task = getProjectState(projectId).tasks[taskId];
     if (!task) return;
 
-    const timestamp = nowIso();
-    task.endOfDay = !task.endOfDay;
-    if (task.endOfDay) task.pinned = false;
-    task.updatedAt = timestamp;
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
+    const endOfDay = !task.endOfDay;
+    await runServerCommand("Updating task on server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update({ end_of_day: endOfDay, pinned: endOfDay ? false : task.pinned })
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
   }
 
-  function hardDeleteTask(taskId) {
+  async function hardDeleteTask(taskId) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.tasks[taskId];
+    const projectId = currentProjectId;
+    const task = getProjectState(projectId).tasks[taskId];
     if (!task) return;
 
     if (!confirm('Delete "' + task.name + '" permanently? This will not move it to the archive.')) return;
 
-    const timestamp = nowIso();
-    projectState.deletedTasks = projectState.deletedTasks || {};
-    projectState.deletedTasks[taskId] = timestamp;
-    delete projectState.tasks[taskId];
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderCurrentScreen();
-
-    // Remove the cloud description for this task (fire-and-forget).
-    deleteTaskDescription(currentProjectId, taskId);
+    await runServerCommand("Deleting task from server...", () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
   }
 
-  function deleteArchivedTask(taskId) {
+  async function deleteArchivedTask(taskId) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const task = projectState.archived[taskId];
+    const projectId = currentProjectId;
+    const task = getProjectState(projectId).archived[taskId];
     if (!task) return;
 
     if (!confirm('Delete archived task "' + task.name + '"?')) return;
 
-    const timestamp = nowIso();
-    projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
-    projectState.deletedArchivedTasks[taskId] = timestamp;
-    delete projectState.archived[taskId];
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderArchiveScreen();
-
-    // Remove the cloud description for this task (fire-and-forget).
-    deleteTaskDescription(currentProjectId, taskId);
+    await runServerCommand("Deleting archived task from server...", () =>
+      supabase
+        .schema("todo")
+        .from(ARCHIVED_TASKS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .eq("id", taskId)
+    );
   }
 
-  function clearArchive() {
+  async function clearArchive() {
     if (!currentProjectId) return;
     if (guardOffline()) return;
-    const projectState = ensureProjectState(currentProjectId, "");
-    const archiveIds = Object.keys(projectState.archived);
+    const projectId = currentProjectId;
+    const archiveIds = Object.keys(getProjectState(projectId).archived);
     if (!archiveIds.length) return;
 
     if (!confirm("Delete the entire archive for this project?")) return;
 
-    const timestamp = nowIso();
-    projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
-    archiveIds.forEach((taskId) => {
-      projectState.deletedArchivedTasks[taskId] = timestamp;
-      delete projectState.archived[taskId];
-      // Remove the cloud description for each deleted task (fire-and-forget).
-      deleteTaskDescription(currentProjectId, taskId);
-    });
-    touchProject(projectState, timestamp);
-    schedulePersist("Saving changes...");
-    renderArchiveScreen();
+    await runServerCommand("Deleting archive from server...", () =>
+      supabase
+        .schema("todo")
+        .from(ARCHIVED_TASKS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+    );
   }
 
   function downloadTextFile(filename, contents) {
@@ -6464,7 +4171,7 @@
     if (deleteBtn) deleteBtn.disabled = false;
   }
 
-  function deleteAllArchivedTasks() {
+  async function deleteAllArchivedTasks() {
     if (guardOffline()) return;
     const allProjects = [...getAllProjects(), ...getInactiveProjects()];
     const projectArchives = allProjects.map((project) => ({
@@ -6476,49 +4183,23 @@
 
     if (!confirm("Delete " + totalArchived + " archived task" + (totalArchived === 1 ? "" : "s") + " across all projects?")) return;
 
-    const timestamp = nowIso();
-    projectArchives.forEach(({ project, archiveIds }) => {
-      if (!archiveIds.length) return;
-      const projectState = ensureProjectState(project.id, "");
-      projectState.deletedArchivedTasks = projectState.deletedArchivedTasks || {};
-      archiveIds.forEach((taskId) => {
-        projectState.deletedArchivedTasks[taskId] = timestamp;
-        delete projectState.archived[taskId];
-        deleteTaskDescription(project.id, taskId);
-      });
-      touchProject(projectState, timestamp);
-    });
-
-    schedulePersist("Saving changes...");
-
-    const deleteBtn = $("#delete-all-archives-btn");
-    if (deleteBtn) deleteBtn.disabled = true;
+    await runServerCommand("Deleting archived tasks from server...", () =>
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).delete().eq("user_id", currentUser.id)
+    );
   }
 
-  function refreshCurrentProject() {
+  async function refreshCurrentProject() {
     if (!currentProjectId) return;
     const project = getProjectMeta(currentProjectId);
     if (!project || !project.hasConfig) {
       setSyncStatus("This project has no recurring config file to refresh.");
       return;
     }
-    const result = generateTasksForProject(currentProjectId);
-    if (result.changed) {
-      schedulePersist(result.created ? "Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "." : "Generation window refreshed.");
-    } else {
-      setSyncStatus("No new tasks were needed.");
-    }
-    renderCurrentScreen();
+    await generateTasksForProjectsOnServer([currentProjectId]);
   }
 
-  function refreshAllProjects() {
-    const result = generateTasksForAllProjects();
-    if (result.changed) {
-      schedulePersist(result.created ? "Generated " + result.created + " new task" + (result.created === 1 ? "" : "s") + "." : "Generation window refreshed.");
-    } else {
-      setSyncStatus("No new tasks were needed.");
-    }
-    renderCurrentScreen();
+  async function refreshAllProjects() {
+    await generateTasksForProjectsOnServer(Object.keys(projectConfigs));
   }
 
   function bindAuthEvents() {
@@ -6569,18 +4250,14 @@
       }
     });
 
-    $("#skip-auth-btn").addEventListener("click", () => {
-      enterApp();
-    });
   }
 
   function bindEvents() {
     if (eventsBound) return;
     eventsBound = true;
+    document.addEventListener("keydown", handleModalKeydown);
 
     $("#generate-all-btn").addEventListener("click", refreshAllProjects);
-    $("#validate-projects-btn").addEventListener("click", validateVisibleProjectsState);
-    $("#validate-full-sync-btn").addEventListener("click", validateFullState);
     $("#toggle-project-actions-btn").addEventListener("click", () => {
       showProjectActions = !showProjectActions;
       renderHome();
@@ -6588,26 +4265,12 @@
     $("#open-create-project-btn").addEventListener("click", openCreateProjectPanel);
     $("#cancel-create-project-btn").addEventListener("click", closeCreateProjectPanel);
     $("#view-inactive-btn").addEventListener("click", openInactiveProjects);
-    $("#show-hidden-projects-btn").addEventListener("click", () => {
-      showHiddenProjects = !showHiddenProjects;
-      renderHome();
-    });
     $("#open-home-add-task-btn").addEventListener("click", () => {
       openAddTaskModal(null);
     });
     $("#download-persistence-backup-btn").addEventListener("click", downloadPersistenceBackup);
     $("#download-all-archives-btn").addEventListener("click", downloadAllArchivedTasks);
     $("#delete-all-archives-btn").addEventListener("click", deleteAllArchivedTasks);
-    const forceOfflineBtn = $("#force-offline-mode-btn");
-    if (forceOfflineBtn) {
-      forceOfflineBtn.addEventListener("click", async () => {
-        if (appEntered || forcedOfflineStartup) return;
-        forcedOfflineStartup = true;
-        forceOfflineBtn.disabled = true;
-        forceOfflineBtn.textContent = "Opening offline mode...";
-        await enterApp();
-      });
-    }
     $("#back-from-inactive-btn").addEventListener("click", () => {
       renderHome();
       showScreen("home");
@@ -6633,9 +4296,7 @@
     });
     $("#all-tasks-view-btn").addEventListener("click", openAllTasks);
     $("#refresh-project-btn").addEventListener("click", refreshCurrentProject);
-    $("#validate-project-btn").addEventListener("click", validateCurrentProjectState);
     $("#refresh-day-project-btn").addEventListener("click", refreshCurrentProject);
-    $("#validate-day-project-btn").addEventListener("click", validateCurrentProjectState);
     $("#open-project-configure-btn").addEventListener("click", () => {
       if (currentProjectId) openConfigModal(currentProjectId);
     });
@@ -6720,57 +4381,12 @@
       $("#sync-now-btn").disabled = false;
     });
 
-    $("#reset-local-state-btn").addEventListener("click", async () => {
-      $("#reset-local-state-btn").disabled = true;
-      await resetLocalStateFromServer();
-      $("#reset-local-state-btn").disabled = false;
-    });
-
-    $("#force-resync-btn").addEventListener("click", async () => {
-      $("#force-resync-btn").disabled = true;
-      await openResyncModal();
-      $("#force-resync-btn").disabled = false;
-    });
-
-    $("#cancel-resync-btn").addEventListener("click", closeResyncModal);
-    $("#confirm-resync-btn").addEventListener("click", confirmResync);
-    $("#pull-remote-resync-btn").addEventListener("click", pullRemoteOverrideLocal);
-    $("#resync-diff").addEventListener("click", discardLocalOnlyResyncItem);
-    $("#resync-modal").addEventListener("click", (event) => {
-      if (event.target === $("#resync-modal")) {
-        closeResyncModal();
-      }
-    });
-
-    $("#stale-push-btn").addEventListener("click", () => resolveStaleUpdate("push"));
-    $("#stale-reset-btn").addEventListener("click", () => resolveStaleUpdate("reset"));
-    $("#stale-review-btn").addEventListener("click", () => resolveStaleUpdate("review"));
-    $("#stale-disable-btn").addEventListener("click", () => resolveStaleUpdate("disable"));
-    $("#stale-update-modal").addEventListener("click", (event) => {
-      if (event.target === $("#stale-update-modal")) {
-        resolveStaleUpdate("cancel");
-      }
-    });
-
-    $("#close-validation-btn").addEventListener("click", closeValidationModal);
-    $("#validation-match-local-all-btn").addEventListener("click", async () => {
-      await applyValidationActionToAll("match-local-to-server");
-    });
-    $("#validation-update-server-all-btn").addEventListener("click", async () => {
-      await applyValidationActionToAll("update-server-from-local");
-    });
-    $("#validation-results").addEventListener("click", handleValidationResultsClick);
-    $("#validation-modal").addEventListener("click", (event) => {
-      if (event.target === $("#validation-modal")) {
-        closeValidationModal();
-      }
-    });
-
     $("#logout-btn").addEventListener("click", async () => {
+      const signedOutUserId = currentUser && currentUser.id;
       if (supabase) {
         await supabase.auth.signOut();
       }
-      clearAllPendingTaskCompletions();
+      clearAllLocalPersistence(signedOutUserId);
       currentUser = null;
       resetSyncTracking();
       appEntered = false;
@@ -6779,29 +4395,34 @@
     });
 
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        flushLocalState();
-      } else {
-        markRemoteStateStale();
+      if (!document.hidden && currentUser && appEntered && Date.now() - lastPullAt > 1000) {
+        syncNow();
       }
     });
-    window.addEventListener("focus", markRemoteStateStale);
-
-    window.addEventListener("beforeunload", flushLocalState);
+    window.addEventListener("focus", () => {
+      if (currentUser && appEntered && Date.now() - lastPullAt > 1000) {
+        syncNow();
+      }
+    });
 
     window.addEventListener("offline", () => {
+      appMode = "offline-readonly";
       updateOfflineBanner();
       renderCurrentScreen();
       setSyncStatus("You are offline. Read-only mode until reconnected.");
     });
 
     window.addEventListener("online", async () => {
+      appMode = "loading";
       updateOfflineBanner();
       setSyncStatus("Back online. Refreshing from server…");
       if (currentUser && appEntered) {
         const pulled = await pullState();
         if (pulled) {
-          generateTasksForAllProjects();
+          await fetchAllProjectConfigsFromDb();
+          await fetchAllRecurringTaskDescriptionsFromDb();
+          rebuildProjectConfigs();
+          await generateTasksForProjectsOnServer(Object.keys(projectConfigs));
           renderCurrentScreen();
           setSyncStatus("Refreshed from server.");
         } else {
@@ -6817,35 +4438,42 @@
       return;
     }
 
-    appEntered = true;
-    loadLocalState();
-    loadLocalProjectConfigs();
-    loadLocalRecurringTaskDescriptions();
-    loadHiddenProjects();
-    loadProjectTagFilters();
-    rebuildProjectConfigs();
-
-    // Restore the last known sync time from localStorage so the stale update
-    // gate can detect if the server was updated while this tab was away.
-    // pullState() will overwrite this with a fresh value immediately below.
-    const persistedSyncTime = loadLastSyncTime();
-    if (persistedSyncTime) {
-      lastPulledRemoteStateUpdatedAt = persistedSyncTime;
+    if (!currentUser) {
+      showScreen("auth");
+      return;
     }
 
-    if (currentUser) {
-      await pullState();
+    appEntered = true;
+    loadProjectTagFilters();
+
+    let serverLoaded = false;
+    if (hasNetworkConnection()) {
+      appMode = "loading";
+      serverLoaded = await pullState();
+    }
+
+    if (serverLoaded) {
+      projectConfigTexts = {};
+      recurringTaskDescriptions = {};
       await fetchAllProjectConfigsFromDb();
       await fetchAllRecurringTaskDescriptionsFromDb();
+    } else {
+      appMode = "offline-readonly";
+      loadLocalState();
+      loadLocalProjectConfigs();
+      loadLocalRecurringTaskDescriptions();
     }
+    rebuildProjectConfigs();
 
-    const generation = generateTasksForAllProjects();
+    if (isOnline()) {
+      await generateTasksForProjectsOnServer(Object.keys(projectConfigs));
+    }
 
     showUserBar();
     updateOfflineBanner();
 
     const defaultId = appState.defaultProjectId;
-    if (defaultId && getProjectMeta(defaultId) && !hiddenProjectIds.has(defaultId)) {
+    if (defaultId && getProjectMeta(defaultId)) {
       currentProjectId = defaultId;
       renderHome();
       openDay(todayKey());
@@ -6854,9 +4482,6 @@
       showScreen("home");
     }
 
-    if (generation.changed) {
-      schedulePersist(generation.created ? "Generated " + generation.created + " new task" + (generation.created === 1 ? "" : "s") + "." : "Saving changes...");
-    }
   }
 
   async function init() {
@@ -6865,13 +4490,10 @@
     if (supabase) {
       bindAuthEvents();
       supabase.auth.onAuthStateChange((event, session) => {
-        if (forcedOfflineStartup) return;
         if (event === "SIGNED_IN" && session && session.user) {
           currentUser = session.user;
-          markRemoteStateStale();
           enterApp();
         } else if (event === "SIGNED_OUT") {
-          clearAllPendingTaskCompletions();
           currentUser = null;
           resetSyncTracking();
           appEntered = false;
@@ -6881,7 +4503,7 @@
       });
 
       const sessionResponse = await supabase.auth.getSession();
-      if (forcedOfflineStartup || appEntered) {
+      if (appEntered) {
         return;
       }
       if (sessionResponse.data && sessionResponse.data.session && sessionResponse.data.session.user) {

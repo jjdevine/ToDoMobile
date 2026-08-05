@@ -1,5 +1,7 @@
 # Migration: Consolidate task_descriptions and project_configs into todo Schema
 
+> Historical migration design: consolidation has been implemented in the normalized schema. Current project configurations use `todo.projects.config_text`, active descriptions use `todo.tasks.body`, and archived descriptions use `todo.archived_tasks.body` after migration `0005_add_archived_task_body.sql`.
+
 ## Overview
 
 This migration consolidates the remaining tables in the `public` schema (`task_descriptions` and `project_configs`) into the `todo` schema by merging their data into the parent tables (`todo.tasks` and `todo.projects` respectively).

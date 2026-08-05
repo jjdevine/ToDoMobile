@@ -2,15 +2,15 @@
 
 This document describes the current implemented functionality of the Task Planner application.
 
-*comment added to force redeploy*
-
 ## Platform and deployment
 
 The app is a web-based task planner designed for desktop and mobile use. It is built with HTML, CSS, and JavaScript and is suitable for deployment to GitHub Pages.
 
-The app supports Supabase authentication and cloud persistence when Supabase is configured. It can also be used in local-only mode, either because Supabase keys are not present or because the user chooses to continue without signing in.
+The app requires Supabase authentication. While online, Supabase is the sole source of truth: application data is loaded from the server and every mutation waits for server confirmation before the displayed state changes.
 
-The application supports offline use through a service worker.
+Successful server snapshots are cached locally under the authenticated user's ID. When the server cannot be reached, the application may display that user's latest cached snapshot in read-only mode. Offline users can navigate, filter, view archives, and download data, but cannot create, edit, complete, defer, configure, generate, or delete anything. Offline changes are never queued for later synchronization.
+
+The application shell supports offline loading through a service worker. Authenticated Supabase responses are never stored in Cache Storage.
 
 ## Project sources
 
@@ -35,7 +35,7 @@ The configuration format is the same as the previous `Projects/*.txt` format:
 - Each line is either a comment (`# ...`) or a task rule.
 - Task rules follow the pattern: `task name-daily-daily`, `task name-workdays-workdays`, `task name-weekly-monday,friday`, `task name-monthly-1`, `task name-annual-MM-DD`, `task name-everyNweeks-YYYY-MM-DD`, or `task name-everyNmonths-YYYY-MM-DD` (where N is any positive integer).
 
-Once a configuration is saved, the project immediately generates any recurring tasks for the current 7-day window.
+Configuration saves are rejected if any non-comment line is invalid. Errors identify the invalid line. Once a configuration is confirmed by the server, the project generates any missing recurring tasks for the current 7-day window through an atomic server operation.
 
 The configuration can be updated or cleared at any time from the Configure button on the project screen.
 
@@ -190,20 +190,22 @@ Users are prompted before deleting the full archive.
 
 Archived tasks also support individual deletion.
 
-## Editing, persistence, and sync
+## Editing, persistence, and refresh
 
-Changes are persisted 2 seconds after they are made.
+The application supports sign up, sign in, sign out, and manual refresh from Supabase. Authentication is required.
 
-The app stores state locally and, when the user is signed in, also syncs state to Supabase.
+Online commands write directly to the relevant Supabase rows or transactional database function. The UI waits for the command and a fresh server snapshot before reporting success. Failed commands do not update the in-memory state or offline cache.
 
-Project and task deletions are synchronized using tombstones so that a newer delete cannot be unintentionally recreated by a stale device during merge.
+Task completion is immediate and transactional: the server copies the complete task, including its description, to the archive and removes the active row in one operation. Recurring generation atomically records generated occurrences, creates their tasks, and advances the project's generation horizon.
 
-When cloud sync is enabled, the app supports:
+Every successful complete server fetch replaces the in-memory state and refreshes the authenticated user's offline cache. The cache is not read during online startup and is deleted when that user explicitly signs out.
 
-- Sign up
-- Sign in
-- Sign out
-- Manual sync
-- Automatic merge of local and remote state
+The former local/server merge, reset-local-state, compare/resync, stale-update, and validation repair interfaces are not part of the server-authoritative model.
 
-If the user is not signed in, the app continues in local-only mode.
+## Additional task and project behavior
+
+Active tasks can be pinned or marked as end-of-day; these states are mutually exclusive and affect task ordering. The task list supports condensed and expanded presentation.
+
+Projects support server-backed tags and can be made inactive. Inactive projects are omitted from the home screen and recurring generation until reactivated. Device-only project hiding is not supported.
+
+The home screen can download normalized CSV backups. Task-list and archive views support their text exports while online or while viewing an offline cached snapshot.

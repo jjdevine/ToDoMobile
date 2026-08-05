@@ -1,5 +1,7 @@
 # Database Structure Review
 
+> Historical document: this review describes the pre-normalization JSONB architecture and its proposed replacement. The current schema is defined by `supabase-normalized-schema.sql` and the ordered files in `migrations/`. The current client is server-authoritative while online and uses a user-scoped cache only for read-only offline viewing.
+
 This document reviews the suitability of the current Supabase database schema used by
 the Task Planner application, identifies risks, and proposes a normalized replacement
 schema together with a safe, zero-data-loss migration plan.

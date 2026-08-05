@@ -17,6 +17,7 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 const cacheFiles = [
   "./index.html",
   "./styles.css",
+  "./core.js",
   "./app.js",
   "./supabase-config.js",
   "./manifest.json",

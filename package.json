@@ -2,6 +2,18 @@
   "name": "task-planner",
   "private": true,
   "scripts": {
-    "build": "node build.js"
+    "build": "node build.js",
+    "lint": "eslint core.js sw.js build.js tests",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test --config playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
+    "jsdom": "^30.0.1",
+    "vitest": "^4.1.10"
   }
 }
