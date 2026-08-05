@@ -1344,10 +1344,12 @@
       return true;
     } catch (error) {
       console.error("Server command failed:", error);
+      const connectionIssue = isServerConnectionError(error);
       showServerConnectionIssue(error, "server-command");
       if (appMode === "online") {
         setSyncStatus("Server update failed. No local change was saved.");
-        showToast("Server update failed. No changes were made.");
+        const detail = connectionIssue ? "" : getUserFacingServerError(error);
+        showToast(detail ? `Server update failed: ${detail}` : "Server update failed. No changes were made.");
       }
       renderCurrentScreen();
       return false;
@@ -1372,6 +1374,15 @@
     if (typeof error === "string") return error;
     if (typeof error.message === "string") return error.message;
     return String(error);
+  }
+
+  function getUserFacingServerError(error) {
+    const message = getErrorMessage(error)
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!message) return "";
+    if (message.length <= 180) return message;
+    return message.slice(0, 177) + "...";
   }
 
   function isServerConnectionError(error) {
