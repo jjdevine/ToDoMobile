@@ -243,13 +243,36 @@ test.describe("task operations", () => {
     await expect(completeBtn).toBeVisible({ timeout: 2000 });
     await completeBtn.click();
 
-    // Give the async runServerCommand time to fire
-    await page.waitForTimeout(400);
+    await expect(completeBtn).toHaveText("Complete 3..");
+    await page.waitForTimeout(1100);
+    await expect(completeBtn).toHaveText("Complete 2..");
+    await page.waitForTimeout(1100);
+    await expect(completeBtn).toHaveText("Complete 1..");
+    await page.waitForTimeout(1300);
 
     const rpcCalls = await page.evaluate(() =>
       window.__sb.calls.filter((c) => c.type === "rpc")
     );
     expect(rpcCalls.some((c) => c.table === "complete_task")).toBe(true);
+  });
+
+  test("pressing complete again cancels pending completion", async ({ page }) => {
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    const deployCard = page.locator(".task-card").filter({ hasText: "Deploy app" });
+    await expect(deployCard).toBeVisible({ timeout: 3000 });
+    const completeBtn = deployCard.locator(".task-btn.complete");
+    await completeBtn.click();
+    await expect(completeBtn).toHaveText("Complete 3..");
+
+    await completeBtn.click();
+    await expect(completeBtn).toHaveText("Complete");
+    await page.waitForTimeout(3400);
+
+    const rpcCalls = await page.evaluate(() =>
+      window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_task")
+    );
+    expect(rpcCalls).toHaveLength(0);
   });
 });
 

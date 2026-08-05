@@ -105,6 +105,8 @@
   let lastPullErrorMessage = "";
   let appMode = "loading";
   let serverCommandInFlight = false;
+  const COMPLETE_COUNTDOWN_SECONDS = 3;
+  let pendingTaskCompletions = {};
 
   function nowIso() {
     return new Date().toISOString();
@@ -136,6 +138,64 @@
       deletedTasks: {},
       deletedArchivedTasks: {},
     };
+  }
+
+  function getPendingTaskCompletion(taskId) {
+    return pendingTaskCompletions[taskId] || null;
+  }
+
+  function getTaskCompletionCountdownLabel(taskId) {
+    const pending = getPendingTaskCompletion(taskId);
+    if (!pending) return null;
+    return "Complete " + pending.remaining + "..";
+  }
+
+  function renderCurrentTaskSections() {
+    if (currentProjectId) renderTaskSections(currentProjectId);
+  }
+
+  function clearPendingTaskCompletion(taskId) {
+    const pending = getPendingTaskCompletion(taskId);
+    if (!pending) return false;
+    if (pending.timerId) window.clearTimeout(pending.timerId);
+    delete pendingTaskCompletions[taskId];
+    return true;
+  }
+
+  function cancelPendingTaskCompletion(taskId) {
+    const cancelled = clearPendingTaskCompletion(taskId);
+    if (cancelled) renderCurrentTaskSections();
+  }
+
+  function scheduleTaskCompletionTick(taskId) {
+    const pending = getPendingTaskCompletion(taskId);
+    if (!pending) return;
+    pending.timerId = window.setTimeout(async () => {
+      const currentPending = getPendingTaskCompletion(taskId);
+      if (!currentPending) return;
+      if (currentPending.remaining <= 1) {
+        delete pendingTaskCompletions[taskId];
+        renderCurrentTaskSections();
+        await completeTask(taskId, { skipDelay: true });
+        return;
+      }
+      currentPending.remaining -= 1;
+      renderCurrentTaskSections();
+      scheduleTaskCompletionTick(taskId);
+    }, 1000);
+  }
+
+  function queueTaskCompletion(taskId) {
+    if (clearPendingTaskCompletion(taskId)) {
+      renderCurrentTaskSections();
+      return;
+    }
+    pendingTaskCompletions[taskId] = {
+      remaining: COMPLETE_COUNTDOWN_SECONDS,
+      timerId: null,
+    };
+    renderCurrentTaskSections();
+    scheduleTaskCompletionTick(taskId);
   }
 
   function isPlainObject(value) {
@@ -2287,14 +2347,20 @@
 
     if (condensedCard && !expandedInCondensed) {
       const requiresDescriptionReview = !!task.description;
+      const pendingCountdownLabel = getTaskCompletionCountdownLabel(task.id);
       const completeButton = document.createElement("button");
       completeButton.type = "button";
       completeButton.className = "task-btn complete";
-      completeButton.textContent = requiresDescriptionReview ? "Complete..." : "Complete";
+      if (pendingCountdownLabel) completeButton.classList.add("countdown");
+      completeButton.textContent = pendingCountdownLabel || (requiresDescriptionReview ? "Complete..." : "Complete");
       if (requiresDescriptionReview) {
         completeButton.setAttribute("aria-label", "Review description before completing task");
       }
       completeButton.addEventListener("click", () => {
+        if (pendingCountdownLabel) {
+          cancelPendingTaskCompletion(task.id);
+          return;
+        }
         if (requiresDescriptionReview) {
           setTaskExpanded(task, true);
           if (currentProjectId) {
@@ -2373,12 +2439,18 @@
       });
       actions.appendChild(deleteButton);
     } else {
+      const pendingCountdownLabel = getTaskCompletionCountdownLabel(task.id);
       const completeButton = document.createElement("button");
       completeButton.type = "button";
       completeButton.className = "task-btn complete";
-      completeButton.textContent = "Complete";
+      if (pendingCountdownLabel) completeButton.classList.add("countdown");
+      completeButton.textContent = pendingCountdownLabel || "Complete";
       completeButton.disabled = offline;
       completeButton.addEventListener("click", () => {
+        if (pendingCountdownLabel) {
+          cancelPendingTaskCompletion(task.id);
+          return;
+        }
         completeTask(task.id);
       });
 
@@ -3486,12 +3558,17 @@
       if (saved) renderRecurringTaskDescriptionsList(projectId);
   }
 
-  async function completeTask(taskId) {
+  async function completeTask(taskId, options) {
     if (!currentProjectId) return;
     if (guardOffline()) return;
+    const skipDelay = !!(options && options.skipDelay);
     const projectId = currentProjectId;
     const task = getProjectState(projectId).tasks[taskId];
     if (!task) return;
+    if (!skipDelay) {
+      queueTaskCompletion(taskId);
+      return;
+    }
 
     await runServerCommand("Completing task on server...", () =>
       supabase.schema("todo").rpc("complete_task", {
