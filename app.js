@@ -1466,17 +1466,6 @@
 
       clearTimeout(saveTimer);
       saveTimer = null;
-      clearAllPendingTaskCompletions();
-      deferTaskId = null;
-      editTaskId = null;
-      appState = createEmptyState();
-      projectConfigTexts = {};
-      projectConfigs = {};
-      recurringTaskDescriptions = {};
-      hiddenProjectIds = new Set();
-      selectedProjectTagFilters = new Set();
-      showHiddenProjects = false;
-      currentProjectId = null;
       resetSyncTracking();
       clearAllLocalPersistence();
 
