@@ -86,6 +86,7 @@
   let selectedDate = todayKey();
   let selectedTaskView = "day";
   let condensedMode = true;
+  let countdownEnabled = true;
   let expandedTaskCards = {};
   let deferTaskId = null;
   let editTaskId = null;
@@ -188,6 +189,10 @@
   function queueTaskCompletion(taskId) {
     if (clearPendingTaskCompletion(taskId)) {
       renderCurrentTaskSections();
+      return;
+    }
+    if (!countdownEnabled) {
+      completeTask(taskId, { skipDelay: true });
       return;
     }
     pendingTaskCompletions[taskId] = {
@@ -2232,6 +2237,20 @@
     });
 
     controls.appendChild(toggle);
+
+    const countdownToggle = document.createElement("button");
+    countdownToggle.type = "button";
+    countdownToggle.className = "task-list-toggle" + (countdownEnabled ? " active" : "");
+    countdownToggle.setAttribute("aria-pressed", countdownEnabled ? "true" : "false");
+    countdownToggle.textContent = countdownEnabled ? "Completion countdown: On" : "Completion countdown: Off";
+    countdownToggle.addEventListener("click", () => {
+      countdownEnabled = !countdownEnabled;
+      countdownToggle.className = "task-list-toggle" + (countdownEnabled ? " active" : "");
+      countdownToggle.setAttribute("aria-pressed", countdownEnabled ? "true" : "false");
+      countdownToggle.textContent = countdownEnabled ? "Completion countdown: On" : "Completion countdown: Off";
+    });
+
+    controls.appendChild(countdownToggle);
 
     if (selectedTaskView === "overdue" && currentProjectId) {
       const overdueCount = getTaskBuckets(currentProjectId, selectedDate).overdue.length;
