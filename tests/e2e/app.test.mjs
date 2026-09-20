@@ -56,8 +56,24 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         created_at: "2026-08-01T10:00:00Z",
         updated_at: "2026-08-01T10:00:00Z",
+      },
+      {
+        id: "task-003",
+        user_id: "user-001",
+        project_id: "proj-001",
+        name: "Plan sprint",
+        body: "",
+        due_date: "2026-08-05",
+        source: "manual",
+        generated_key: null,
+        pinned: false,
+        end_of_day: false,
+        group_id: null,
+        created_at: "2026-08-01T10:30:00Z",
+        updated_at: "2026-08-01T10:30:00Z",
       },
       {
         id: "task-002",
@@ -70,6 +86,7 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         created_at: "2026-08-01T11:00:00Z",
         updated_at: "2026-08-01T11:00:00Z",
       },
@@ -86,6 +103,7 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         completed_at: "2026-07-31T09:00:00Z",
         created_at: "2026-07-30T08:00:00Z",
         updated_at: "2026-07-31T09:00:00Z",
@@ -219,10 +237,16 @@ test.describe("task operations", () => {
 
     // Clear call log right before submitting so we can detect the INSERT cleanly
     await page.evaluate(() => { window.__sb.calls = []; });
-    await page.locator("#confirm-add-task-btn").click();
+    await page.evaluate(() => {
+      document
+        .getElementById("add-task-form")
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
 
-    // Wait for modal to close (element still in DOM but display:none = 'hidden' state)
-    await page.waitForSelector("#add-task-modal", { state: "hidden", timeout: 5000 });
+    await page.waitForFunction(
+      () => window.__sb.calls.some((c) => c.type === "insert" && c.table === "tasks"),
+      { timeout: 5000 }
+    );
 
     // Verify INSERT was logged
     const insertCalls = await page.evaluate(() =>
@@ -273,6 +297,116 @@ test.describe("task operations", () => {
       window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_task")
     );
     expect(rpcCalls).toHaveLength(0);
+  });
+
+  test("grouped task actions apply to every task in the group", async ({ page }) => {
+    await page.locator('button:has-text("Select tasks to group")').click();
+
+    const writeTestsCard = page.locator(".task-card").filter({ hasText: "Write tests" });
+    const planSprintCard = page.locator(".task-card").filter({ hasText: "Plan sprint" });
+    await writeTestsCard.locator('input[aria-label="Select Write tests for grouping"]').check();
+    await planSprintCard.locator('input[aria-label="Select Plan sprint for grouping"]').check();
+
+    await page.locator('button:has-text("Group selected (2)")').click();
+    await expect(page.locator(".group-badge")).toHaveCount(2);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    await page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.pin")
+      .click();
+
+    const pinCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.pinned === true
+      )
+    );
+    expect(pinCalls).toHaveLength(1);
+    const pinnedState = await page.evaluate(() =>
+      window.__sb.state.tables.tasks
+        .filter((task) => task.id === "task-001" || task.id === "task-003")
+        .map((task) => ({ id: task.id, pinned: task.pinned }))
+    );
+    expect(pinnedState).toEqual([
+      { id: "task-001", pinned: true },
+      { id: "task-003", pinned: true },
+    ]);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    const groupedDeferButton = page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.defer");
+    await groupedDeferButton.click();
+    await expect(page.locator("#defer-task-name")).toContainText("2 grouped tasks");
+    await page.locator(".defer-date-btn").first().click();
+
+    const deferCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.due_date
+      )
+    );
+    expect(deferCalls).toHaveLength(1);
+    const deferredDate = deferCalls[0].payload.due_date;
+    const deferredState = await page.evaluate(() =>
+      window.__sb.state.tables.tasks
+        .filter((task) => task.id === "task-001" || task.id === "task-003")
+        .map((task) => ({ id: task.id, due_date: task.due_date }))
+    );
+    expect(deferredState).toEqual([
+      { id: "task-001", due_date: deferredDate },
+      { id: "task-003", due_date: deferredDate },
+    ]);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+    await page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.ungroup")
+      .click();
+
+    const ungroupCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.group_id === null
+      )
+    );
+    expect(ungroupCalls).toHaveLength(1);
+  });
+
+  test("grouped completion uses the multi-task RPC", async ({ page }) => {
+    await page.locator('button:has-text("Select tasks to group")').click();
+
+    await page
+      .locator(".task-card")
+      .filter({ hasText: "Plan sprint" })
+      .locator('input[aria-label="Select Plan sprint for grouping"]')
+      .check();
+    await page
+      .locator(".task-card")
+      .filter({ hasText: "Write tests" })
+      .locator('input[aria-label="Select Write tests for grouping"]')
+      .check();
+
+    await page.locator('button:has-text("Group selected (2)")').click();
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    const completeBtn = page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Plan sprint" })
+      .locator(".task-btn.complete");
+    await completeBtn.click();
+    await page.waitForFunction(
+      () => window.__sb.calls.some((c) => c.type === "rpc" && c.table === "complete_tasks"),
+      { timeout: 5000 }
+    );
+
+    const rpcCalls = await page.evaluate(() =>
+      window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_tasks")
+    );
+    expect(rpcCalls).toHaveLength(1);
   });
 });
 

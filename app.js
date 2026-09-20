@@ -18,36 +18,6 @@
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
-  const WEEKDAY_TOKENS = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-  ];
-  const DAY_ALIASES = {
-    mon: "monday",
-    monday: "monday",
-    tue: "tuesday",
-    tues: "tuesday",
-    tuesday: "tuesday",
-    wed: "wednesday",
-    wednesday: "wednesday",
-    thu: "thursday",
-    thur: "thursday",
-    thurs: "thursday",
-    thursday: "thursday",
-    fri: "friday",
-    friday: "friday",
-    sat: "saturday",
-    saturday: "saturday",
-    sun: "sunday",
-    sunday: "sunday",
-  };
-
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => document.querySelectorAll(selector);
 
@@ -91,6 +61,8 @@
   let deferTaskId = null;
   let editTaskId = null;
   let configModalProjectId = null;
+  let groupSelectionMode = false;
+  let selectedTaskIds = new Set();
 
   let projectConfigs = {};
   let projectConfigTexts = {};
@@ -153,6 +125,22 @@
 
   function renderCurrentTaskSections() {
     if (currentProjectId) renderTaskSections(currentProjectId);
+  }
+
+  function clearTaskGroupingSelection(options) {
+    const keepMode = !!(options && options.keepMode);
+    selectedTaskIds.clear();
+    if (!keepMode) groupSelectionMode = false;
+  }
+
+  function pruneTaskGroupingSelection(projectId) {
+    if (!selectedTaskIds.size) return;
+    const tasksById = projectId ? getProjectState(projectId).tasks : null;
+    Array.from(selectedTaskIds).forEach((taskId) => {
+      if (!tasksById || !tasksById[taskId]) {
+        selectedTaskIds.delete(taskId);
+      }
+    });
   }
 
   function clearPendingTaskCompletion(taskId) {
@@ -240,10 +228,6 @@
     return a < b ? -1 : a > b ? 1 : 0;
   }
 
-  function maxDateKey(a, b) {
-    return compareDateKeys(a, b) >= 0 ? a : b;
-  }
-
   function enumerateDateKeys(startDate, endDate) {
     const out = [];
     let cursor = startDate;
@@ -291,6 +275,7 @@
       completedAt,
       pinned: typeof raw.pinned === "boolean" ? raw.pinned : false,
       endOfDay: typeof raw.endOfDay === "boolean" ? raw.endOfDay : false,
+      groupId: typeof raw.groupId === "string" && raw.groupId ? raw.groupId : null,
     };
   }
 
@@ -601,6 +586,7 @@
         generatedKey: row.generated_key,
         pinned: row.pinned,
         endOfDay: row.end_of_day,
+        groupId: row.group_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }, projectId, false);
@@ -626,6 +612,7 @@
         generatedKey: row.generated_key,
         pinned: row.pinned,
         endOfDay: row.end_of_day,
+        groupId: row.group_id,
         completedAt: row.completed_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -676,8 +663,8 @@
         .eq("user_id", userId)
         .maybeSingle(),
       supabase.schema("todo").from(PROJECTS_TABLE).select("id, name, inactive, last_generated_through, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, created_at, updated_at").eq("user_id", userId),
-      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, body, completed_at, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, group_id, body, created_at, updated_at").eq("user_id", userId),
+      supabase.schema("todo").from(ARCHIVED_TASKS_TABLE).select("id, project_id, name, due_date, source, generated_key, pinned, end_of_day, group_id, body, completed_at, created_at, updated_at").eq("user_id", userId),
       supabase.schema("todo").from(GENERATED_OCCURRENCES_TABLE).select("occurrence_key, project_id, task_id, due_date, task_name, created_at").eq("user_id", userId),
       supabase.schema("todo").from(TAGS_TABLE).select("tag").eq("user_id", userId),
       supabase.schema("todo").from(PROJECT_TAGS_TABLE).select("project_id, tag").eq("user_id", userId),
@@ -819,10 +806,6 @@
     return window.TaskPlannerCore.parseProjectConfig(text);
   }
 
-  function getWeekdayToken(dateKey) {
-    return WEEKDAY_TOKENS[parseDateKey(dateKey).getDay()];
-  }
-
   function ruleMatchesDate(rule, dateKey) {
     return window.TaskPlannerCore.ruleMatchesDate(rule, dateKey);
   }
@@ -896,44 +879,6 @@
     } catch (error) {
       console.warn("Failed to fetch project configs:", error);
       showServerConnectionIssue(error, "project-config-fetch");
-    }
-  }
-
-  async function upsertProjectConfigToDb(projectId, configText) {
-    if (!supabase || !currentUser) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(PROJECTS_TABLE)
-        .update({ config_text: configText })
-        .eq("user_id", currentUser.id)
-        .eq("id", projectId);
-      if (error) {
-        console.warn("Failed to save project config:", error.message);
-        showServerConnectionIssue(error, "project-config-upsert");
-      }
-    } catch (error) {
-      console.warn("Failed to save project config:", error);
-      showServerConnectionIssue(error, "project-config-upsert");
-    }
-  }
-
-  async function deleteProjectConfigFromDb(projectId) {
-    if (!supabase || !currentUser) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(PROJECTS_TABLE)
-        .update({ config_text: "" })
-        .eq("user_id", currentUser.id)
-        .eq("id", projectId);
-      if (error) {
-        console.warn("Failed to delete project config:", error.message);
-        showServerConnectionIssue(error, "project-config-delete");
-      }
-    } catch (error) {
-      console.warn("Failed to delete project config:", error);
-      showServerConnectionIssue(error, "project-config-delete");
     }
   }
 
@@ -1013,51 +958,6 @@
     } catch (error) {
       console.warn("Failed to fetch recurring task descriptions:", error);
       showServerConnectionIssue(error, "recurring-task-desc-fetch");
-    }
-  }
-
-  async function upsertRecurringTaskDescriptionToDb(projectId, taskName, description) {
-    if (!supabase || !currentUser || !projectId || !taskName) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
-        .upsert(
-          {
-            user_id: currentUser.id,
-            project_id: projectId,
-            task_name: taskName,
-            description: description || "",
-          },
-          { onConflict: "user_id, project_id, task_name" }
-        );
-      if (error) {
-        console.warn("Failed to save recurring task description:", error.message);
-        showServerConnectionIssue(error, "recurring-task-desc-upsert");
-      }
-    } catch (error) {
-      console.warn("Failed to save recurring task description:", error);
-      showServerConnectionIssue(error, "recurring-task-desc-upsert");
-    }
-  }
-
-  async function deleteRecurringTaskDescriptionFromDb(projectId, taskName) {
-    if (!supabase || !currentUser || !projectId || !taskName) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
-        .delete()
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("task_name", taskName);
-      if (error) {
-        console.warn("Failed to delete recurring task description:", error.message);
-        showServerConnectionIssue(error, "recurring-task-desc-delete");
-      }
-    } catch (error) {
-      console.warn("Failed to delete recurring task description:", error);
-      showServerConnectionIssue(error, "recurring-task-desc-delete");
     }
   }
 
@@ -1197,7 +1097,137 @@
     return Object.values(getProjectState(projectId).archived || {});
   }
 
+  function getGroupedTaskIds(projectId, taskId) {
+    const tasksById = getProjectState(projectId).tasks || {};
+    const task = tasksById[taskId];
+    if (!task) return [];
+    if (!task.groupId) return [taskId];
+    return Object.values(tasksById)
+      .filter((candidate) => candidate.groupId === task.groupId)
+      .map((candidate) => candidate.id);
+  }
+
+  function getSelectedGroupingTasks(projectId) {
+    pruneTaskGroupingSelection(projectId);
+    return Array.from(selectedTaskIds)
+      .map((taskId) => getProjectState(projectId).tasks[taskId])
+      .filter(Boolean);
+  }
+
+  function getTaskGroupingSectionKey(task) {
+    const dueDate = (task && task.dueDate) || "";
+    if (selectedTaskView === "all") return dueDate || "nodate";
+    if (selectedTaskView === "day") return isDateKey(selectedDate) ? selectedDate : dueDate;
+    if (selectedTaskView === "nodate") return "nodate";
+    if (selectedTaskView === "overdue" || selectedTaskView === "future") return selectedTaskView;
+    return dueDate || "nodate";
+  }
+
+  function getSelectedGroupingSectionKey(projectId) {
+    const tasks = getSelectedGroupingTasks(projectId);
+    return tasks.length ? getTaskGroupingSectionKey(tasks[0]) : null;
+  }
+
+  function canSelectTaskForGrouping(task) {
+    if (!groupSelectionMode || !currentProjectId || !task) return false;
+    const selectedSectionKey = getSelectedGroupingSectionKey(currentProjectId);
+    return selectedSectionKey === null || selectedSectionKey === getTaskGroupingSectionKey(task);
+  }
+
+  function toggleTaskGroupingSelection(taskId) {
+    if (!currentProjectId) return;
+    const task = getProjectState(currentProjectId).tasks[taskId];
+    if (!task) return;
+    if (selectedTaskIds.has(taskId)) {
+      selectedTaskIds.delete(taskId);
+    } else {
+      if (!canSelectTaskForGrouping(task)) {
+        showToast("Select tasks from the same section before grouping them.");
+        return;
+      }
+      selectedTaskIds.add(taskId);
+    }
+    renderTaskSections(currentProjectId);
+  }
+
+  async function updateTasksOnServer(projectId, taskIds, patch, statusMessage) {
+    const ids = Array.from(new Set((taskIds || []).filter(Boolean)));
+    if (!projectId || !ids.length) return false;
+    return runServerCommand(statusMessage, () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update(patch)
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .in("id", ids)
+    );
+  }
+
+  async function deleteTasksOnServer(projectId, taskIds, statusMessage) {
+    const ids = Array.from(new Set((taskIds || []).filter(Boolean)));
+    if (!projectId || !ids.length) return false;
+    return runServerCommand(statusMessage, () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .in("id", ids)
+    );
+  }
+
+  async function groupSelectedTasks() {
+    if (!currentProjectId) return;
+    if (guardOffline()) return;
+    const tasks = getSelectedGroupingTasks(currentProjectId);
+    if (tasks.length < 2) {
+      showToast("Select at least two tasks from the same section to group them.");
+      return;
+    }
+    const sectionKey = getTaskGroupingSectionKey(tasks[0]);
+    if (tasks.some((task) => getTaskGroupingSectionKey(task) !== sectionKey)) {
+      showToast("Only tasks from the same section can be grouped.");
+      return;
+    }
+    const groupId = createId("group");
+    const taskIds = tasks.map((task) => task.id);
+    clearTaskGroupingSelection();
+    const saved = await updateTasksOnServer(currentProjectId, taskIds, { group_id: groupId }, "Grouping tasks on server...");
+    if (saved && currentProjectId && $("#day-screen").classList.contains("active")) {
+      renderTaskSections(currentProjectId);
+    }
+  }
+
+  async function ungroupTask(taskId) {
+    if (!currentProjectId) return;
+    if (guardOffline()) return;
+    const task = getProjectState(currentProjectId).tasks[taskId];
+    if (!task || !task.groupId) return;
+    const taskIds = getGroupedTaskIds(currentProjectId, taskId);
+    clearTaskGroupingSelection();
+    const saved = await updateTasksOnServer(currentProjectId, taskIds, { group_id: null }, "Removing task group on server...");
+    if (saved && currentProjectId && $("#day-screen").classList.contains("active")) {
+      renderTaskSections(currentProjectId);
+    }
+  }
+
   function sortActiveTasks(tasks) {
+    function compareSectionTaskOrder(a, b) {
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return compareIso(a.createdAt, b.createdAt);
+    }
+
+    const groupAnchors = {};
+    tasks.forEach((task) => {
+      if (!task.groupId) return;
+      const anchor = groupAnchors[task.groupId];
+      if (!anchor || compareSectionTaskOrder(task, anchor) < 0) {
+        groupAnchors[task.groupId] = task;
+      }
+    });
+
     return tasks.slice().sort((a, b) => {
       const catA = a.pinned ? 0 : (a.endOfDay ? 2 : 1);
       const catB = b.pinned ? 0 : (b.endOfDay ? 2 : 1);
@@ -1205,8 +1235,15 @@
       const dueA = a.dueDate || "9999-12-31";
       const dueB = b.dueDate || "9999-12-31";
       if (dueA !== dueB) return compareDateKeys(dueA, dueB);
-      if (a.name !== b.name) return a.name.localeCompare(b.name);
-      return compareIso(a.createdAt, b.createdAt);
+      const groupedA = a.groupId ? 0 : 1;
+      const groupedB = b.groupId ? 0 : 1;
+      if (groupedA !== groupedB) return groupedA - groupedB;
+      if (a.groupId && b.groupId && a.groupId !== b.groupId) {
+        const anchorCompare = compareSectionTaskOrder(groupAnchors[a.groupId], groupAnchors[b.groupId]);
+        if (anchorCompare !== 0) return anchorCompare;
+        return a.groupId.localeCompare(b.groupId);
+      }
+      return compareSectionTaskOrder(a, b);
     });
   }
 
@@ -2252,6 +2289,40 @@
 
     controls.appendChild(countdownToggle);
 
+    if (currentProjectId) {
+      pruneTaskGroupingSelection(currentProjectId);
+      const selectedCount = getSelectedGroupingTasks(currentProjectId).length;
+      const groupingToggle = document.createElement("button");
+      groupingToggle.type = "button";
+      groupingToggle.className = "task-list-toggle" + (groupSelectionMode ? " active" : "");
+      groupingToggle.setAttribute("aria-pressed", groupSelectionMode ? "true" : "false");
+      groupingToggle.textContent = groupSelectionMode
+        ? `Selecting tasks${selectedCount ? " (" + selectedCount + ")" : ""}`
+        : "Select tasks to group";
+      groupingToggle.addEventListener("click", () => {
+        if (groupSelectionMode) {
+          clearTaskGroupingSelection();
+        } else {
+          groupSelectionMode = true;
+          selectedTaskIds.clear();
+        }
+        if (currentProjectId && $("#day-screen").classList.contains("active")) {
+          renderTaskSections(currentProjectId);
+        }
+      });
+      controls.appendChild(groupingToggle);
+
+      if (groupSelectionMode) {
+        const groupButton = document.createElement("button");
+        groupButton.type = "button";
+        groupButton.className = "btn-secondary";
+        groupButton.textContent = selectedCount > 1 ? `Group selected (${selectedCount})` : "Group selected";
+        groupButton.disabled = !isOnline() || selectedCount < 2;
+        groupButton.addEventListener("click", groupSelectedTasks);
+        controls.appendChild(groupButton);
+      }
+    }
+
     if (selectedTaskView === "overdue" && currentProjectId) {
       const overdueCount = getTaskBuckets(currentProjectId, selectedDate).overdue.length;
       if (overdueCount > 0) {
@@ -2334,6 +2405,8 @@
     if (!task.dueDate) card.classList.add("nodate");
     if (!options.archived && task.pinned) card.classList.add("pinned");
     if (!options.archived && task.endOfDay) card.classList.add("end-of-day");
+    if (!options.archived && task.groupId) card.classList.add("grouped");
+    if (!options.archived && groupSelectionMode && selectedTaskIds.has(task.id)) card.classList.add("selected-for-group");
     const condensedCard = condensedMode && !options.archived;
     const expandedInCondensed = condensedCard ? isTaskExpanded(task) : false;
     if (condensedCard && !expandedInCondensed) card.classList.add("condensed");
@@ -2341,22 +2414,55 @@
     const titleRow = document.createElement("div");
     titleRow.className = "task-card-title-row";
 
+    const titleMain = document.createElement("div");
+    titleMain.className = "task-card-title-main";
+
+    if (groupSelectionMode && !options.archived) {
+      const selectLabel = document.createElement("label");
+      selectLabel.className = "task-group-select";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedTaskIds.has(task.id);
+      checkbox.disabled = !checkbox.checked && !canSelectTaskForGrouping(task);
+      checkbox.setAttribute("aria-label", "Select " + task.name + " for grouping");
+      checkbox.addEventListener("change", () => {
+        toggleTaskGroupingSelection(task.id);
+      });
+      selectLabel.appendChild(checkbox);
+      titleMain.appendChild(selectLabel);
+    }
+
     const title = document.createElement("h4");
     title.appendChild(linkify(task.name));
-    titleRow.appendChild(title);
+    titleMain.appendChild(title);
+    titleRow.appendChild(titleMain);
+
+    const badges = document.createElement("div");
+    badges.className = "task-card-badges";
 
     if (!options.archived && task.pinned) {
       const pinBadge = document.createElement("span");
       pinBadge.className = "pin-badge";
       pinBadge.textContent = "📌 Pinned";
-      titleRow.appendChild(pinBadge);
+      badges.appendChild(pinBadge);
     }
 
     if (!options.archived && task.endOfDay) {
       const endOfDayBadge = document.createElement("span");
       endOfDayBadge.className = "end-of-day-badge";
       endOfDayBadge.textContent = "🌙 End of Day";
-      titleRow.appendChild(endOfDayBadge);
+      badges.appendChild(endOfDayBadge);
+    }
+
+    if (!options.archived && task.groupId) {
+      const groupBadge = document.createElement("span");
+      groupBadge.className = "group-badge";
+      groupBadge.textContent = "🔗 Grouped";
+      badges.appendChild(groupBadge);
+    }
+
+    if (badges.childNodes.length) {
+      titleRow.appendChild(badges);
     }
 
     card.appendChild(titleRow);
@@ -2417,6 +2523,18 @@
       endOfDayButton.addEventListener("click", () => {
         toggleEndOfDayTask(task.id);
       });
+
+      if (task.groupId) {
+        const ungroupButton = document.createElement("button");
+        ungroupButton.type = "button";
+        ungroupButton.className = "task-btn ungroup";
+        ungroupButton.textContent = "Ungroup";
+        ungroupButton.disabled = offline;
+        ungroupButton.addEventListener("click", () => {
+          ungroupTask(task.id);
+        });
+        actions.appendChild(ungroupButton);
+      }
 
       const expandButton = document.createElement("button");
       expandButton.type = "button";
@@ -2521,6 +2639,18 @@
       });
       actions.appendChild(endOfDayButton);
 
+      if (task.groupId) {
+        const ungroupButton = document.createElement("button");
+        ungroupButton.type = "button";
+        ungroupButton.className = "task-btn ungroup";
+        ungroupButton.textContent = "Ungroup";
+        ungroupButton.disabled = offline;
+        ungroupButton.addEventListener("click", () => {
+          ungroupTask(task.id);
+        });
+        actions.appendChild(ungroupButton);
+      }
+
       if (condensedCard && expandedInCondensed) {
         const collapseButton = document.createElement("button");
         collapseButton.type = "button";
@@ -2601,6 +2731,7 @@
   }
 
   function renderTaskSections(projectId) {
+    pruneTaskGroupingSelection(projectId);
     renderTaskListControls();
 
     const taskSections = $("#task-sections");
@@ -2812,6 +2943,7 @@
   }
 
   function openProject(projectId) {
+    clearTaskGroupingSelection();
     currentProjectId = projectId;
     selectedDate = todayKey();
     selectedTaskView = "day";
@@ -2819,32 +2951,38 @@
   }
 
   function openDay(dateKey) {
+    clearTaskGroupingSelection();
     selectedDate = dateKey;
     selectedTaskView = "day";
     renderDayView();
   }
 
   function openOverdue() {
+    clearTaskGroupingSelection();
     selectedTaskView = "overdue";
     renderDayView();
   }
 
   function openNoDueDate() {
+    clearTaskGroupingSelection();
     selectedTaskView = "nodate";
     renderDayView();
   }
 
   function openAllTasks() {
+    clearTaskGroupingSelection();
     selectedTaskView = "all";
     renderDayView();
   }
 
   function openFutureTasks() {
+    clearTaskGroupingSelection();
     selectedTaskView = "future";
     renderDayView();
   }
 
   function openArchive() {
+    clearTaskGroupingSelection();
     renderArchiveScreen();
     showScreen("archive");
   }
@@ -2986,7 +3124,7 @@
     requestAnimationFrame(() => {
       try {
         input.focus({ preventScroll: true });
-      } catch (error) {
+      } catch {
         input.focus();
       }
     });
@@ -3299,7 +3437,7 @@
     const cadenceEl = document.querySelector('input[name="builder-cadence"]:checked');
     const cadence = cadenceEl ? cadenceEl.value : "weekly";
 
-    let schedule = "";
+    let schedule;
     if (cadence === "weekly") {
       const checked = Array.from(document.querySelectorAll('input[name="builder-weekday"]:checked')).map((cb) => cb.value);
       if (!checked.length) {
@@ -3429,7 +3567,6 @@
     const errorEl = $("#config-modal-error");
     const configText = textarea ? textarea.value : "";
     const parsedConfig = window.TaskPlannerCore.parseProjectConfigDetailed(configText);
-    const rules = parsedConfig.rules;
 
     if (parsedConfig.errors.length) {
       if (errorEl) {
@@ -3585,6 +3722,17 @@
       return;
     }
 
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    if (taskIds.length > 1) {
+      await runServerCommand("Completing grouped tasks on server...", () =>
+        supabase.schema("todo").rpc("complete_tasks", {
+          p_project_id: projectId,
+          p_task_ids: taskIds,
+        })
+      );
+      return;
+    }
+
     await runServerCommand("Completing task on server...", () =>
       supabase.schema("todo").rpc("complete_task", {
         p_project_id: projectId,
@@ -3641,9 +3789,21 @@
 
     editTaskId = taskId;
     configureTaskDateInput("edit-task-date-input");
+    const groupedTask = !!task.groupId;
+    const editNote = $("#edit-task-note");
+    if (editNote) {
+      editNote.textContent = groupedTask
+        ? "This task is grouped. Description and title edits stay individual. Use Defer, Pin, or End of Day on the task card to update the whole group."
+        : "";
+      editNote.classList.toggle("hidden", !groupedTask);
+    }
     $("#edit-task-name-input").value = task.name || "";
     $("#edit-task-description-input").value = task.description || "";
     $("#edit-task-date-input").value = task.dueDate || "";
+    $("#edit-task-date-input").disabled = groupedTask;
+    document.querySelectorAll('.date-quick-btn[data-target="edit-task-date-input"]').forEach((button) => {
+      button.disabled = groupedTask;
+    });
     openModal("edit-modal", "#edit-task-name-input");
 
     // Fetch the authoritative long description from the cloud table.
@@ -3664,6 +3824,15 @@
 
   function closeEditModal() {
     editTaskId = null;
+    const editNote = $("#edit-task-note");
+    if (editNote) {
+      editNote.textContent = "";
+      editNote.classList.add("hidden");
+    }
+    $("#edit-task-date-input").disabled = false;
+    document.querySelectorAll('.date-quick-btn[data-target="edit-task-date-input"]').forEach((button) => {
+      button.disabled = false;
+    });
     closeModal("edit-modal");
   }
 
@@ -3772,7 +3941,10 @@
 
     deferTaskId = taskId;
     populateDeferButtons(task);
-    $("#defer-task-name").textContent = task.name;
+    const groupedTaskIds = getGroupedTaskIds(currentProjectId, taskId);
+    $("#defer-task-name").textContent = groupedTaskIds.length > 1
+      ? 'This will reschedule ' + groupedTaskIds.length + ' grouped tasks.'
+      : task.name;
     openModal("defer-modal", ".defer-date-btn");
   }
 
@@ -3792,14 +3964,12 @@
       return;
     }
 
-    const saved = await runServerCommand("Scheduling task on server...", () =>
-      supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ due_date: dateKey })
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("id", taskId)
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    const saved = await updateTasksOnServer(
+      projectId,
+      taskIds,
+      { due_date: dateKey },
+      taskIds.length > 1 ? "Scheduling grouped tasks on server..." : "Scheduling task on server..."
     );
     if (saved) closeDeferModal();
   }
@@ -3815,14 +3985,12 @@
       return;
     }
 
-    const saved = await runServerCommand("Clearing due date on server...", () =>
-      supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ due_date: null })
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("id", taskId)
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    const saved = await updateTasksOnServer(
+      projectId,
+      taskIds,
+      { due_date: null },
+      taskIds.length > 1 ? "Clearing grouped due dates on server..." : "Clearing due date on server..."
     );
     if (saved) closeDeferModal();
   }
@@ -3835,14 +4003,12 @@
     if (!task) return;
 
     const pinned = !task.pinned;
-    await runServerCommand("Updating task on server...", () =>
-      supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ pinned, end_of_day: pinned ? false : task.endOfDay })
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("id", taskId)
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    await updateTasksOnServer(
+      projectId,
+      taskIds,
+      { pinned, end_of_day: pinned ? false : task.endOfDay },
+      taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
 
@@ -3854,14 +4020,12 @@
     if (!task) return;
 
     const endOfDay = !task.endOfDay;
-    await runServerCommand("Updating task on server...", () =>
-      supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .update({ end_of_day: endOfDay, pinned: endOfDay ? false : task.pinned })
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("id", taskId)
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    await updateTasksOnServer(
+      projectId,
+      taskIds,
+      { end_of_day: endOfDay, pinned: endOfDay ? false : task.pinned },
+      taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
 
@@ -3872,16 +4036,16 @@
     const task = getProjectState(projectId).tasks[taskId];
     if (!task) return;
 
-    if (!confirm('Delete "' + task.name + '" permanently? This will not move it to the archive.')) return;
+    const taskIds = getGroupedTaskIds(projectId, taskId);
+    const confirmed = taskIds.length > 1
+      ? confirm("Delete this entire group permanently? This will not move any grouped tasks to the archive.")
+      : confirm('Delete "' + task.name + '" permanently? This will not move it to the archive.');
+    if (!confirmed) return;
 
-    await runServerCommand("Deleting task from server...", () =>
-      supabase
-        .schema("todo")
-        .from(TASKS_TABLE)
-        .delete()
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("id", taskId)
+    await deleteTasksOnServer(
+      projectId,
+      taskIds,
+      taskIds.length > 1 ? "Deleting grouped tasks from server..." : "Deleting task from server..."
     );
   }
 
@@ -4347,7 +4511,7 @@
           errorEl.textContent = "Check your email for a confirmation link.";
           errorEl.classList.remove("hidden");
         }
-      } catch (error) {
+      } catch {
         errorEl.textContent = "Network error. Please try again.";
         errorEl.classList.remove("hidden");
       } finally {

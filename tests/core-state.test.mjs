@@ -100,7 +100,7 @@ describe("buildStateFromNormalizedRows", () => {
     return {
       id, project_id: projectId, name, body,
       due_date: "2026-08-05", source: "manual", generated_key: null,
-      pinned: false, end_of_day: false,
+      pinned: false, end_of_day: false, group_id: null,
       created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-01T10:00:00Z",
     };
   }
@@ -109,7 +109,7 @@ describe("buildStateFromNormalizedRows", () => {
     return {
       id, project_id: projectId, name, body,
       due_date: "2026-08-01", source: "manual", generated_key: null,
-      pinned: false, end_of_day: false,
+      pinned: false, end_of_day: false, group_id: null,
       completed_at: "2026-08-02T09:00:00Z",
       created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-02T09:00:00Z",
     };
@@ -131,6 +131,21 @@ describe("buildStateFromNormalizedRows", () => {
     expect(task.name).toBe("Write report");
     expect(task.description).toBe("Detailed notes");
     expect(task.dueDate).toBe("2026-08-05");
+    expect(task.groupId).toBeNull();
+  });
+
+  it("preserves task group ids from server rows", () => {
+    const groupedTask = makeTask("proj-a", "task-1", "Grouped task", "Detailed notes");
+    groupedTask.group_id = "group-123";
+    const state = buildStateFromNormalizedRows({
+      projects: [makeProject("proj-a", "Work")],
+      tasks: [groupedTask],
+      archivedTasks: [],
+      generatedOccurrences: [],
+      projectTags: [],
+    });
+
+    expect(state.projects["proj-a"].tasks["task-1"].groupId).toBe("group-123");
   });
 
   it("preserves description on archived tasks via body column", () => {

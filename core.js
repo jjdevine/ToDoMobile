@@ -331,6 +331,7 @@
         generatedKey: typeof row.generated_key === "string" && row.generated_key ? row.generated_key : null,
         pinned: !!row.pinned,
         endOfDay: !!row.end_of_day,
+        groupId: typeof row.group_id === "string" && row.group_id ? row.group_id : null,
         createdAt: typeof row.created_at === "string" ? row.created_at : "",
         updatedAt: typeof row.updated_at === "string" ? row.updated_at : "",
         completedAt: archived && typeof row.completed_at === "string" ? row.completed_at : null,

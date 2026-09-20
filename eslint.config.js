@@ -8,6 +8,17 @@ module.exports = [
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
+    files: ["app.js"],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        SUPABASE_ANON_KEY: "readonly",
+        SUPABASE_PUBLISHABLE_KEY: "readonly",
+        SUPABASE_URL: "readonly",
+      },
+    },
+  },
+  {
     files: ["sw.js"],
     languageOptions: {
       globals: {
