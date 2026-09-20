@@ -326,6 +326,20 @@ test.describe("task operations", () => {
       )
     );
     expect(deferCalls).toHaveLength(2);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+    await page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.ungroup")
+      .click();
+
+    const ungroupCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.group_id === null
+      )
+    );
+    expect(ungroupCalls).toHaveLength(2);
   });
 });
 
