@@ -56,8 +56,24 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         created_at: "2026-08-01T10:00:00Z",
         updated_at: "2026-08-01T10:00:00Z",
+      },
+      {
+        id: "task-003",
+        user_id: "user-001",
+        project_id: "proj-001",
+        name: "Plan sprint",
+        body: "",
+        due_date: "2026-08-05",
+        source: "manual",
+        generated_key: null,
+        pinned: false,
+        end_of_day: false,
+        group_id: null,
+        created_at: "2026-08-01T10:30:00Z",
+        updated_at: "2026-08-01T10:30:00Z",
       },
       {
         id: "task-002",
@@ -70,6 +86,7 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         created_at: "2026-08-01T11:00:00Z",
         updated_at: "2026-08-01T11:00:00Z",
       },
@@ -86,6 +103,7 @@ const FIXTURE_STATE = {
         generated_key: null,
         pinned: false,
         end_of_day: false,
+        group_id: null,
         completed_at: "2026-07-31T09:00:00Z",
         created_at: "2026-07-30T08:00:00Z",
         updated_at: "2026-07-31T09:00:00Z",
@@ -273,6 +291,35 @@ test.describe("task operations", () => {
       window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_task")
     );
     expect(rpcCalls).toHaveLength(0);
+  });
+
+  test("grouped task actions apply to every task in the group", async ({ page }) => {
+    await page.locator('button:has-text("Select tasks to group")').click();
+
+    const writeTestsCard = page.locator(".task-card").filter({ hasText: "Write tests" });
+    const planSprintCard = page.locator(".task-card").filter({ hasText: "Plan sprint" });
+    await writeTestsCard.locator('input[aria-label="Select Write tests for grouping"]').check();
+    await planSprintCard.locator('input[aria-label="Select Plan sprint for grouping"]').check();
+
+    await page.locator('button:has-text("Group selected (2)")').click();
+    await expect(page.locator(".group-badge")).toHaveCount(2);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    const groupedDeferButton = page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.defer");
+    await groupedDeferButton.click();
+    await expect(page.locator("#defer-task-name")).toContainText("2 grouped tasks");
+    await page.locator(".defer-date-btn").first().click();
+
+    const deferCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.due_date
+      )
+    );
+    expect(deferCalls).toHaveLength(2);
   });
 });
 

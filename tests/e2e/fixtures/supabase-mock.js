@@ -52,6 +52,64 @@
     root.__sb.calls.push({ type: type, table: table, payload: payload });
   }
 
+  function clone(value) {
+    return value === undefined ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function matchesFilters(row, filters) {
+    return filters.every(function (filter) {
+      if (filter.type === "eq") return row[filter.col] === filter.val;
+      if (filter.type === "in") return filter.vals.indexOf(row[filter.col]) >= 0;
+      return true;
+    });
+  }
+
+  function tableRef(name) {
+    var key = name.replace(/^todo\./, "").toLowerCase();
+    if (!root.__sb.state.tables[key]) root.__sb.state.tables[key] = [];
+    return root.__sb.state.tables[key];
+  }
+
+  function applyWrite(builder) {
+    var table = tableRef(builder._table);
+    if (builder._operation === "insert") {
+      var rows = Array.isArray(builder._payload) ? builder._payload : [builder._payload];
+      rows.forEach(function (row) {
+        table.push(clone(row));
+      });
+      return;
+    }
+    if (builder._operation === "update") {
+      table.forEach(function (row) {
+        if (matchesFilters(row, builder._filters)) {
+          Object.assign(row, clone(builder._payload));
+        }
+      });
+      return;
+    }
+    if (builder._operation === "delete") {
+      root.__sb.state.tables[builder._table.replace(/^todo\./, "").toLowerCase()] = table.filter(function (row) {
+        return !matchesFilters(row, builder._filters);
+      });
+    }
+  }
+
+  function completeTaskRpc(projectId, taskId) {
+    var tasks = tableRef("tasks");
+    var archived = tableRef("archived_tasks");
+    var matchIndex = tasks.findIndex(function (row) {
+      return row.project_id === projectId && row.id === taskId;
+    });
+    if (matchIndex < 0) return;
+    var row = tasks[matchIndex];
+    var archivedRow = Object.assign({}, clone(row), {
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    archived.push(archivedRow);
+    tasks.splice(matchIndex, 1);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Chainable query builder
   // ──────────────────────────────────────────────────────────────────────────
@@ -72,11 +130,27 @@
         return this;
       },
       eq: function (col, val) {
+        if (this._filters) {
+          this._filters.push({ type: "eq", col: col, val: val });
+          return this;
+        }
         // Filter only when data is an array (read queries); write builders
         // set _writeResult, so filtering doesn't apply.
         if (this._writeResult === undefined && Array.isArray(this._data)) {
           this._data = this._data.filter(function (row) {
             return row[col] === val;
+          });
+        }
+        return this;
+      },
+      in: function (col, vals) {
+        if (this._filters) {
+          this._filters.push({ type: "in", col: col, vals: vals || [] });
+          return this;
+        }
+        if (this._writeResult === undefined && Array.isArray(this._data)) {
+          this._data = this._data.filter(function (row) {
+            return (vals || []).indexOf(row[col]) >= 0;
           });
         }
         return this;
@@ -89,7 +163,7 @@
       // ── Write operations ───────────────────────────────────────────────
       insert: function (payload) {
         log("insert", this._table, payload);
-        return makeWriteBuilder(this._table);
+        return makeWriteBuilder(this._table, "insert", payload);
       },
       upsert: function (payload, opts) {
         log("upsert", this._table, { payload: payload, opts: opts });
@@ -97,11 +171,11 @@
       },
       update: function (payload) {
         log("update", this._table, payload);
-        return makeWriteBuilder(this._table);
+        return makeWriteBuilder(this._table, "update", payload);
       },
       delete: function () {
         log("delete", this._table, null);
-        return makeWriteBuilder(this._table);
+        return makeWriteBuilder(this._table, "delete", null);
       },
 
       // ── Promise interface ──────────────────────────────────────────────
@@ -124,9 +198,16 @@
     return b;
   }
 
-  function makeWriteBuilder(tableName) {
+  function makeWriteBuilder(tableName, operation, payload) {
     var b = makeBuilder(tableName, null);
+    b._filters = [];
+    b._operation = operation || null;
+    b._payload = payload;
     b._writeResult = { data: null, error: null };
+    b.then = function (resolve, reject) {
+      applyWrite(b);
+      return Promise.resolve(b._writeResult).then(resolve, reject);
+    };
     return b;
   }
 
@@ -166,6 +247,13 @@
 
   function makeRpcBuilder(fnName, args) {
     log("rpc", fnName, args);
+    if (fnName === "complete_task") {
+      completeTaskRpc(args.p_project_id, args.p_task_id);
+    } else if (fnName === "complete_tasks") {
+      (args.p_task_ids || []).forEach(function (taskId) {
+        completeTaskRpc(args.p_project_id, taskId);
+      });
+    }
     // Return value: generate_recurring_tasks returns an integer, complete_task returns null
     var returnVal = fnName === "generate_recurring_tasks" ? 0 : null;
     var b = makeBuilder(fnName, null);

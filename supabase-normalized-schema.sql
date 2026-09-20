@@ -185,6 +185,7 @@ create table if not exists todo.tasks (
   generated_key text,
   pinned        boolean     not null default false,
   end_of_day    boolean     not null default false,
+  group_id      text,
   body          text        not null default '',
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
@@ -241,6 +242,7 @@ create table if not exists todo.archived_tasks (
   generated_key text,
   pinned        boolean     not null default false,
   end_of_day    boolean     not null default false,
+  group_id      text,
   body          text        not null default '',
   completed_at  timestamptz,
   created_at    timestamptz not null default now(),
@@ -412,11 +414,11 @@ declare
 begin
   insert into todo.archived_tasks (
     user_id, project_id, id, name, due_date, source, generated_key, pinned,
-    end_of_day, body, completed_at, created_at, updated_at
+    end_of_day, group_id, body, completed_at, created_at, updated_at
   )
   select
     user_id, project_id, id, name, due_date, source, generated_key, pinned,
-    end_of_day, body, now(), created_at, now()
+    end_of_day, group_id, body, now(), created_at, now()
   from todo.tasks
   where user_id = auth.uid() and project_id = p_project_id and id = p_task_id
   on conflict (user_id, project_id, id) do update
@@ -426,6 +428,7 @@ begin
       generated_key = excluded.generated_key,
       pinned = excluded.pinned,
       end_of_day = excluded.end_of_day,
+      group_id = excluded.group_id,
       body = excluded.body,
       completed_at = excluded.completed_at,
       updated_at = excluded.updated_at;
