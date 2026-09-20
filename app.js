@@ -1102,8 +1102,11 @@
     const task = tasksById[taskId];
     if (!task) return [];
     if (!task.groupId) return [taskId];
+    const sectionKey = getTaskGroupingSectionKey(task);
     return Object.values(tasksById)
-      .filter((candidate) => candidate.groupId === task.groupId)
+      .filter((candidate) =>
+        candidate.groupId === task.groupId && getTaskGroupingSectionKey(candidate) === sectionKey
+      )
       .map((candidate) => candidate.id);
   }
 
