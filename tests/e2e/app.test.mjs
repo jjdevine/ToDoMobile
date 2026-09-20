@@ -324,6 +324,15 @@ test.describe("task operations", () => {
       )
     );
     expect(pinCalls).toHaveLength(1);
+    const pinnedState = await page.evaluate(() =>
+      window.__sb.state.tables.tasks
+        .filter((task) => task.id === "task-001" || task.id === "task-003")
+        .map((task) => ({ id: task.id, pinned: task.pinned }))
+    );
+    expect(pinnedState).toEqual([
+      { id: "task-001", pinned: true },
+      { id: "task-003", pinned: true },
+    ]);
 
     await page.evaluate(() => { window.__sb.calls = []; });
 
@@ -341,6 +350,16 @@ test.describe("task operations", () => {
       )
     );
     expect(deferCalls).toHaveLength(1);
+    const deferredDate = deferCalls[0].payload.due_date;
+    const deferredState = await page.evaluate(() =>
+      window.__sb.state.tables.tasks
+        .filter((task) => task.id === "task-001" || task.id === "task-003")
+        .map((task) => ({ id: task.id, due_date: task.due_date }))
+    );
+    expect(deferredState).toEqual([
+      { id: "task-001", due_date: deferredDate },
+      { id: "task-003", due_date: deferredDate },
+    ]);
 
     await page.evaluate(() => { window.__sb.calls = []; });
     await page

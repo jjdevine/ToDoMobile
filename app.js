@@ -1102,11 +1102,8 @@
     const task = tasksById[taskId];
     if (!task) return [];
     if (!task.groupId) return [taskId];
-    const sectionKey = getTaskGroupingSectionKey(task);
     return Object.values(tasksById)
-      .filter((candidate) =>
-        candidate.groupId === task.groupId && getTaskGroupingSectionKey(candidate) === sectionKey
-      )
+      .filter((candidate) => candidate.groupId === task.groupId)
       .map((candidate) => candidate.id);
   }
 
@@ -1118,8 +1115,12 @@
   }
 
   function getTaskGroupingSectionKey(task) {
-    const category = task && task.pinned ? "pinned" : task && task.endOfDay ? "end-of-day" : "active";
-    return category + "::" + ((task && task.dueDate) || "");
+    const dueDate = (task && task.dueDate) || "";
+    if (selectedTaskView === "all") return dueDate || "nodate";
+    if (selectedTaskView === "day") return isDateKey(selectedDate) ? selectedDate : dueDate;
+    if (selectedTaskView === "nodate") return "nodate";
+    if (selectedTaskView === "overdue" || selectedTaskView === "future") return selectedTaskView;
+    return dueDate || "nodate";
   }
 
   function getSelectedGroupingSectionKey(projectId) {
