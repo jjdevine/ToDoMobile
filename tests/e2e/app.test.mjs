@@ -312,6 +312,21 @@ test.describe("task operations", () => {
 
     await page.evaluate(() => { window.__sb.calls = []; });
 
+    await page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Write tests" })
+      .locator(".task-btn.pin")
+      .click();
+
+    const pinCalls = await page.evaluate(() =>
+      window.__sb.calls.filter(
+        (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.pinned === true
+      )
+    );
+    expect(pinCalls).toHaveLength(1);
+
+    await page.evaluate(() => { window.__sb.calls = []; });
+
     const groupedDeferButton = page
       .locator(".task-card.grouped")
       .filter({ hasText: "Write tests" })
@@ -325,7 +340,7 @@ test.describe("task operations", () => {
         (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.due_date
       )
     );
-    expect(deferCalls).toHaveLength(2);
+    expect(deferCalls).toHaveLength(1);
 
     await page.evaluate(() => { window.__sb.calls = []; });
     await page
@@ -339,7 +354,39 @@ test.describe("task operations", () => {
         (c) => c.type === "update" && c.table === "tasks" && c.payload && c.payload.group_id === null
       )
     );
-    expect(ungroupCalls).toHaveLength(2);
+    expect(ungroupCalls).toHaveLength(1);
+  });
+
+  test("grouped completion uses the multi-task RPC", async ({ page }) => {
+    await page.locator('button:has-text("Select tasks to group")').click();
+
+    await page
+      .locator(".task-card")
+      .filter({ hasText: "Plan sprint" })
+      .locator('input[aria-label="Select Plan sprint for grouping"]')
+      .check();
+    await page
+      .locator(".task-card")
+      .filter({ hasText: "Write tests" })
+      .locator('input[aria-label="Select Write tests for grouping"]')
+      .check();
+
+    await page.locator('button:has-text("Group selected (2)")').click();
+    await page.evaluate(() => { window.__sb.calls = []; });
+
+    const completeBtn = page
+      .locator(".task-card.grouped")
+      .filter({ hasText: "Plan sprint" })
+      .locator(".task-btn.complete");
+    await completeBtn.click();
+    await page.waitForTimeout(1100);
+    await page.waitForTimeout(1100);
+    await page.waitForTimeout(1300);
+
+    const rpcCalls = await page.evaluate(() =>
+      window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_tasks")
+    );
+    expect(rpcCalls).toHaveLength(1);
   });
 });
 

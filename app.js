@@ -1152,38 +1152,29 @@
   async function updateTasksOnServer(projectId, taskIds, patch, statusMessage) {
     const ids = Array.from(new Set((taskIds || []).filter(Boolean)));
     if (!projectId || !ids.length) return false;
-    return runServerCommand(statusMessage, async () => {
-      for (const taskId of ids) {
-        const nextPatch = typeof patch === "function" ? patch(taskId) : patch;
-        const result = await supabase
-          .schema("todo")
-          .from(TASKS_TABLE)
-          .update(nextPatch)
-          .eq("user_id", currentUser.id)
-          .eq("project_id", projectId)
-          .eq("id", taskId);
-        if (result && result.error) return result;
-      }
-      return { error: null };
-    });
+    return runServerCommand(statusMessage, () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .update(patch)
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .in("id", ids)
+    );
   }
 
   async function deleteTasksOnServer(projectId, taskIds, statusMessage) {
     const ids = Array.from(new Set((taskIds || []).filter(Boolean)));
     if (!projectId || !ids.length) return false;
-    return runServerCommand(statusMessage, async () => {
-      for (const taskId of ids) {
-        const result = await supabase
-          .schema("todo")
-          .from(TASKS_TABLE)
-          .delete()
-          .eq("user_id", currentUser.id)
-          .eq("project_id", projectId)
-          .eq("id", taskId);
-        if (result && result.error) return result;
-      }
-      return { error: null };
-    });
+    return runServerCommand(statusMessage, () =>
+      supabase
+        .schema("todo")
+        .from(TASKS_TABLE)
+        .delete()
+        .eq("user_id", currentUser.id)
+        .eq("project_id", projectId)
+        .in("id", ids)
+    );
   }
 
   async function groupSelectedTasks() {
@@ -1226,12 +1217,12 @@
       const catA = a.pinned ? 0 : (a.endOfDay ? 2 : 1);
       const catB = b.pinned ? 0 : (b.endOfDay ? 2 : 1);
       if (catA !== catB) return catA - catB;
-      const groupedA = a.groupId ? 0 : 1;
-      const groupedB = b.groupId ? 0 : 1;
-      if (groupedA !== groupedB) return groupedA - groupedB;
       const dueA = a.dueDate || "9999-12-31";
       const dueB = b.dueDate || "9999-12-31";
       if (dueA !== dueB) return compareDateKeys(dueA, dueB);
+      const groupedA = a.groupId ? 0 : 1;
+      const groupedB = b.groupId ? 0 : 1;
+      if (groupedA !== groupedB) return groupedA - groupedB;
       if (a.groupId && b.groupId && a.groupId !== b.groupId) {
         return a.groupId.localeCompare(b.groupId);
       }
@@ -4000,10 +3991,7 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      (groupTaskId) => {
-        const groupTask = getProjectState(projectId).tasks[groupTaskId];
-        return { pinned, end_of_day: pinned ? false : !!(groupTask && groupTask.endOfDay) };
-      },
+      { pinned, end_of_day: pinned ? false : task.endOfDay },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
@@ -4020,10 +4008,7 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      (groupTaskId) => {
-        const groupTask = getProjectState(projectId).tasks[groupTaskId];
-        return { end_of_day: endOfDay, pinned: endOfDay ? false : !!(groupTask && groupTask.pinned) };
-      },
+      { end_of_day: endOfDay, pinned: endOfDay ? false : task.pinned },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
