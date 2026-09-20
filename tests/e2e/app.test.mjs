@@ -379,9 +379,10 @@ test.describe("task operations", () => {
       .filter({ hasText: "Plan sprint" })
       .locator(".task-btn.complete");
     await completeBtn.click();
-    await page.waitForTimeout(1100);
-    await page.waitForTimeout(1100);
-    await page.waitForTimeout(1300);
+    await page.waitForFunction(
+      () => window.__sb.calls.some((c) => c.type === "rpc" && c.table === "complete_tasks"),
+      { timeout: 5000 }
+    );
 
     const rpcCalls = await page.evaluate(() =>
       window.__sb.calls.filter((c) => c.type === "rpc" && c.table === "complete_tasks")

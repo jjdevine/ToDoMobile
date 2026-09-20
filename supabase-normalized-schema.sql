@@ -453,7 +453,8 @@ declare
   task_id text;
   completed_count integer := 0;
 begin
-  foreach task_id in array coalesce(p_task_ids, array[]::text[])
+  for task_id in
+    select distinct unnest(coalesce(p_task_ids, array[]::text[]))
   loop
     perform todo.complete_task(p_project_id, task_id);
     completed_count := completed_count + 1;

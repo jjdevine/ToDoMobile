@@ -1213,6 +1213,20 @@
   }
 
   function sortActiveTasks(tasks) {
+    function compareSectionTaskOrder(a, b) {
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return compareIso(a.createdAt, b.createdAt);
+    }
+
+    const groupAnchors = {};
+    tasks.forEach((task) => {
+      if (!task.groupId) return;
+      const anchor = groupAnchors[task.groupId];
+      if (!anchor || compareSectionTaskOrder(task, anchor) < 0) {
+        groupAnchors[task.groupId] = task;
+      }
+    });
+
     return tasks.slice().sort((a, b) => {
       const catA = a.pinned ? 0 : (a.endOfDay ? 2 : 1);
       const catB = b.pinned ? 0 : (b.endOfDay ? 2 : 1);
@@ -1224,10 +1238,11 @@
       const groupedB = b.groupId ? 0 : 1;
       if (groupedA !== groupedB) return groupedA - groupedB;
       if (a.groupId && b.groupId && a.groupId !== b.groupId) {
+        const anchorCompare = compareSectionTaskOrder(groupAnchors[a.groupId], groupAnchors[b.groupId]);
+        if (anchorCompare !== 0) return anchorCompare;
         return a.groupId.localeCompare(b.groupId);
       }
-      if (a.name !== b.name) return a.name.localeCompare(b.name);
-      return compareIso(a.createdAt, b.createdAt);
+      return compareSectionTaskOrder(a, b);
     });
   }
 
