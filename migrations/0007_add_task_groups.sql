@@ -43,3 +43,22 @@ begin
   where user_id = auth.uid() and project_id = p_project_id and id = p_task_id;
 end;
 $$;
+
+create or replace function todo.complete_tasks(p_project_id text, p_task_ids text[])
+returns integer
+language plpgsql
+security invoker
+set search_path = todo, public
+as $$
+declare
+  task_id text;
+  completed_count integer := 0;
+begin
+  foreach task_id in array coalesce(p_task_ids, array[]::text[])
+  loop
+    perform todo.complete_task(p_project_id, task_id);
+    completed_count := completed_count + 1;
+  end loop;
+  return completed_count;
+end;
+$$;

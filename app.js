@@ -1113,15 +1113,20 @@
       .filter(Boolean);
   }
 
-  function getSelectedGroupingDueDate(projectId) {
+  function getTaskGroupingSectionKey(task) {
+    const category = task && task.pinned ? "pinned" : task && task.endOfDay ? "end-of-day" : "active";
+    return category + "::" + ((task && task.dueDate) || "");
+  }
+
+  function getSelectedGroupingSectionKey(projectId) {
     const tasks = getSelectedGroupingTasks(projectId);
-    return tasks.length ? (tasks[0].dueDate || "") : null;
+    return tasks.length ? getTaskGroupingSectionKey(tasks[0]) : null;
   }
 
   function canSelectTaskForGrouping(task) {
     if (!groupSelectionMode || !currentProjectId || !task) return false;
-    const selectedDueDate = getSelectedGroupingDueDate(currentProjectId);
-    return selectedDueDate === null || selectedDueDate === (task.dueDate || "");
+    const selectedSectionKey = getSelectedGroupingSectionKey(currentProjectId);
+    return selectedSectionKey === null || selectedSectionKey === getTaskGroupingSectionKey(task);
   }
 
   function toggleTaskGroupingSelection(taskId) {
@@ -1132,7 +1137,7 @@
       selectedTaskIds.delete(taskId);
     } else {
       if (!canSelectTaskForGrouping(task)) {
-        showToast("Select tasks from the same due-date section before grouping them.");
+        showToast("Select tasks from the same section before grouping them.");
         return;
       }
       selectedTaskIds.add(taskId);
@@ -1184,9 +1189,9 @@
       showToast("Select at least two tasks from the same section to group them.");
       return;
     }
-    const dueDate = tasks[0].dueDate || "";
-    if (tasks.some((task) => (task.dueDate || "") !== dueDate)) {
-      showToast("Only tasks from the same due-date section can be grouped.");
+    const sectionKey = getTaskGroupingSectionKey(tasks[0]);
+    if (tasks.some((task) => getTaskGroupingSectionKey(task) !== sectionKey)) {
+      showToast("Only tasks from the same section can be grouped.");
       return;
     }
     const groupId = createId("group");
@@ -3990,7 +3995,7 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      { pinned, end_of_day: pinned ? false : task.endOfDay },
+      { pinned, end_of_day: false },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
@@ -4007,7 +4012,7 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      { end_of_day: endOfDay, pinned: endOfDay ? false : task.pinned },
+      { end_of_day: endOfDay, pinned: false },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
