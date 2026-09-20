@@ -1098,10 +1098,11 @@
   }
 
   function getGroupedTaskIds(projectId, taskId) {
-    const task = getProjectState(projectId).tasks[taskId];
+    const tasksById = getProjectState(projectId).tasks || {};
+    const task = tasksById[taskId];
     if (!task) return [];
     if (!task.groupId) return [taskId];
-    return sortActiveTasks(getProjectTasks(projectId))
+    return Object.values(tasksById)
       .filter((candidate) => candidate.groupId === task.groupId)
       .map((candidate) => candidate.id);
   }
@@ -1150,10 +1151,11 @@
     if (!projectId || !ids.length) return false;
     return runServerCommand(statusMessage, async () => {
       for (const taskId of ids) {
+        const nextPatch = typeof patch === "function" ? patch(taskId) : patch;
         const result = await supabase
           .schema("todo")
           .from(TASKS_TABLE)
-          .update(patch)
+          .update(nextPatch)
           .eq("user_id", currentUser.id)
           .eq("project_id", projectId)
           .eq("id", taskId);
@@ -3995,7 +3997,10 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      { pinned, end_of_day: false },
+      (groupTaskId) => {
+        const groupTask = getProjectState(projectId).tasks[groupTaskId];
+        return { pinned, end_of_day: pinned ? false : !!(groupTask && groupTask.endOfDay) };
+      },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
@@ -4012,7 +4017,10 @@
     await updateTasksOnServer(
       projectId,
       taskIds,
-      { end_of_day: endOfDay, pinned: false },
+      (groupTaskId) => {
+        const groupTask = getProjectState(projectId).tasks[groupTaskId];
+        return { end_of_day: endOfDay, pinned: endOfDay ? false : !!(groupTask && groupTask.pinned) };
+      },
       taskIds.length > 1 ? "Updating grouped tasks on server..." : "Updating task on server..."
     );
   }
