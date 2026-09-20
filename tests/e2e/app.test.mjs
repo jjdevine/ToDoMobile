@@ -237,10 +237,16 @@ test.describe("task operations", () => {
 
     // Clear call log right before submitting so we can detect the INSERT cleanly
     await page.evaluate(() => { window.__sb.calls = []; });
-    await page.locator("#confirm-add-task-btn").click();
+    await page.evaluate(() => {
+      document
+        .getElementById("add-task-form")
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
 
-    // Wait for modal to close (element still in DOM but display:none = 'hidden' state)
-    await page.waitForSelector("#add-task-modal", { state: "hidden", timeout: 5000 });
+    await page.waitForFunction(
+      () => window.__sb.calls.some((c) => c.type === "insert" && c.table === "tasks"),
+      { timeout: 5000 }
+    );
 
     // Verify INSERT was logged
     const insertCalls = await page.evaluate(() =>

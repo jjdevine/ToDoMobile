@@ -18,36 +18,6 @@
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
-  const TASK_LINE = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
-  const WEEKDAY_TOKENS = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-  ];
-  const DAY_ALIASES = {
-    mon: "monday",
-    monday: "monday",
-    tue: "tuesday",
-    tues: "tuesday",
-    tuesday: "tuesday",
-    wed: "wednesday",
-    wednesday: "wednesday",
-    thu: "thursday",
-    thur: "thursday",
-    thurs: "thursday",
-    thursday: "thursday",
-    fri: "friday",
-    friday: "friday",
-    sat: "saturday",
-    saturday: "saturday",
-    sun: "sunday",
-    sunday: "sunday",
-  };
-
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => document.querySelectorAll(selector);
 
@@ -256,10 +226,6 @@
     if (!a) return -1;
     if (!b) return 1;
     return a < b ? -1 : a > b ? 1 : 0;
-  }
-
-  function maxDateKey(a, b) {
-    return compareDateKeys(a, b) >= 0 ? a : b;
   }
 
   function enumerateDateKeys(startDate, endDate) {
@@ -840,10 +806,6 @@
     return window.TaskPlannerCore.parseProjectConfig(text);
   }
 
-  function getWeekdayToken(dateKey) {
-    return WEEKDAY_TOKENS[parseDateKey(dateKey).getDay()];
-  }
-
   function ruleMatchesDate(rule, dateKey) {
     return window.TaskPlannerCore.ruleMatchesDate(rule, dateKey);
   }
@@ -917,44 +879,6 @@
     } catch (error) {
       console.warn("Failed to fetch project configs:", error);
       showServerConnectionIssue(error, "project-config-fetch");
-    }
-  }
-
-  async function upsertProjectConfigToDb(projectId, configText) {
-    if (!supabase || !currentUser) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(PROJECTS_TABLE)
-        .update({ config_text: configText })
-        .eq("user_id", currentUser.id)
-        .eq("id", projectId);
-      if (error) {
-        console.warn("Failed to save project config:", error.message);
-        showServerConnectionIssue(error, "project-config-upsert");
-      }
-    } catch (error) {
-      console.warn("Failed to save project config:", error);
-      showServerConnectionIssue(error, "project-config-upsert");
-    }
-  }
-
-  async function deleteProjectConfigFromDb(projectId) {
-    if (!supabase || !currentUser) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(PROJECTS_TABLE)
-        .update({ config_text: "" })
-        .eq("user_id", currentUser.id)
-        .eq("id", projectId);
-      if (error) {
-        console.warn("Failed to delete project config:", error.message);
-        showServerConnectionIssue(error, "project-config-delete");
-      }
-    } catch (error) {
-      console.warn("Failed to delete project config:", error);
-      showServerConnectionIssue(error, "project-config-delete");
     }
   }
 
@@ -1034,51 +958,6 @@
     } catch (error) {
       console.warn("Failed to fetch recurring task descriptions:", error);
       showServerConnectionIssue(error, "recurring-task-desc-fetch");
-    }
-  }
-
-  async function upsertRecurringTaskDescriptionToDb(projectId, taskName, description) {
-    if (!supabase || !currentUser || !projectId || !taskName) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
-        .upsert(
-          {
-            user_id: currentUser.id,
-            project_id: projectId,
-            task_name: taskName,
-            description: description || "",
-          },
-          { onConflict: "user_id, project_id, task_name" }
-        );
-      if (error) {
-        console.warn("Failed to save recurring task description:", error.message);
-        showServerConnectionIssue(error, "recurring-task-desc-upsert");
-      }
-    } catch (error) {
-      console.warn("Failed to save recurring task description:", error);
-      showServerConnectionIssue(error, "recurring-task-desc-upsert");
-    }
-  }
-
-  async function deleteRecurringTaskDescriptionFromDb(projectId, taskName) {
-    if (!supabase || !currentUser || !projectId || !taskName) return;
-    try {
-      const { error } = await supabase
-        .schema("todo")
-        .from(RECURRING_TASK_DESCRIPTIONS_TABLE)
-        .delete()
-        .eq("user_id", currentUser.id)
-        .eq("project_id", projectId)
-        .eq("task_name", taskName);
-      if (error) {
-        console.warn("Failed to delete recurring task description:", error.message);
-        showServerConnectionIssue(error, "recurring-task-desc-delete");
-      }
-    } catch (error) {
-      console.warn("Failed to delete recurring task description:", error);
-      showServerConnectionIssue(error, "recurring-task-desc-delete");
     }
   }
 
@@ -3228,7 +3107,7 @@
     requestAnimationFrame(() => {
       try {
         input.focus({ preventScroll: true });
-      } catch (error) {
+      } catch {
         input.focus();
       }
     });
@@ -3541,7 +3420,7 @@
     const cadenceEl = document.querySelector('input[name="builder-cadence"]:checked');
     const cadence = cadenceEl ? cadenceEl.value : "weekly";
 
-    let schedule = "";
+    let schedule;
     if (cadence === "weekly") {
       const checked = Array.from(document.querySelectorAll('input[name="builder-weekday"]:checked')).map((cb) => cb.value);
       if (!checked.length) {
@@ -3671,7 +3550,6 @@
     const errorEl = $("#config-modal-error");
     const configText = textarea ? textarea.value : "";
     const parsedConfig = window.TaskPlannerCore.parseProjectConfigDetailed(configText);
-    const rules = parsedConfig.rules;
 
     if (parsedConfig.errors.length) {
       if (errorEl) {
@@ -4616,7 +4494,7 @@
           errorEl.textContent = "Check your email for a confirmation link.";
           errorEl.classList.remove("hidden");
         }
-      } catch (error) {
+      } catch {
         errorEl.textContent = "Network error. Please try again.";
         errorEl.classList.remove("hidden");
       } finally {

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "node build.js",
-    "lint": "eslint core.js sw.js build.js tests",
+    "lint": "eslint core.js app.js sw.js build.js tests",
     "test": "npm run test:unit",
     "test:unit": "vitest run",
     "test:e2e": "playwright test --config playwright.config.mjs"
