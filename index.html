@@ -352,7 +352,29 @@
             <label for="config-file-input" class="btn-secondary config-upload-label">Upload .txt file</label>
             <input type="file" id="config-file-input" accept=".txt,text/plain" class="config-file-input-hidden">
           </div>
-          <textarea id="config-modal-textarea" placeholder="task name-daily-daily&#10;task name-workdays-workdays&#10;task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
+          <div class="config-rules-list-wrap">
+            <div class="config-rules-list-header">
+              <h4 class="task-builder-heading">Current recurring rules</h4>
+            </div>
+            <p id="config-rules-empty" class="config-rules-empty hidden">No recurring rules yet. Add one above or upload a file.</p>
+            <div class="config-rules-table-wrap">
+              <table class="config-rules-table" aria-label="Recurring configuration rules">
+                <thead>
+                  <tr>
+                    <th scope="col">Task</th>
+                    <th scope="col">Cadence</th>
+                    <th scope="col">Schedule</th>
+                    <th scope="col" class="config-rules-actions-col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="config-rules-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <details class="config-raw-editor">
+            <summary>Advanced: Edit raw config text</summary>
+            <textarea id="config-modal-textarea" placeholder="task name-daily-daily&#10;task name-workdays-workdays&#10;task name-weekly-monday,wednesday,friday&#10;task name-monthly-1&#10;task name-annual-01-15&#10;task name-everyNweeks-YYYY-MM-DD&#10;task name-everyNmonths-YYYY-MM-DD&#10;# This is a comment" rows="10" spellcheck="false"></textarea>
+          </details>
           <p id="config-modal-error" class="auth-error hidden"></p>
         </form>
 
