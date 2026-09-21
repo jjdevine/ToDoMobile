@@ -3438,6 +3438,7 @@
       tr.appendChild(scheduleTd);
 
       const actionsTd = document.createElement("td");
+      actionsTd.setAttribute("headers", "config-rules-actions-header");
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "btn-secondary config-rule-remove-btn";
