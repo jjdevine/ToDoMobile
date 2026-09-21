@@ -3419,7 +3419,7 @@
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "btn-secondary config-rule-remove-btn";
-      removeBtn.textContent = "Remove";
+      removeBtn.textContent = "Remove line " + String(row.lineIndex + 1);
       removeBtn.setAttribute("data-line-index", String(row.lineIndex));
       removeBtn.setAttribute("aria-label", "Remove rule " + row.task);
       actionsTd.appendChild(removeBtn);
