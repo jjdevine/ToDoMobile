@@ -3388,8 +3388,9 @@
   function renderConfigRulesTable() {
     const tableBody = $("#config-rules-table-body");
     const emptyEl = $("#config-rules-empty");
+    const tableWrap = $("#config-rules-table-wrap");
     const textarea = $("#config-modal-textarea");
-    if (!tableBody || !emptyEl || !textarea) return;
+    if (!tableBody || !emptyEl || !tableWrap || !textarea) return;
 
     const rows = String(textarea.value || "")
       .split(/\r?\n/)
@@ -3398,6 +3399,8 @@
 
     tableBody.innerHTML = "";
     emptyEl.classList.toggle("hidden", rows.length > 0);
+    tableWrap.classList.toggle("hidden", rows.length === 0);
+    tableWrap.setAttribute("aria-hidden", rows.length === 0 ? "true" : "false");
 
     rows.forEach((row) => {
       const tr = document.createElement("tr");
@@ -3421,7 +3424,7 @@
       removeBtn.className = "btn-secondary config-rule-remove-btn";
       removeBtn.textContent = "Remove line " + String(row.lineIndex + 1);
       removeBtn.setAttribute("data-line-index", String(row.lineIndex));
-      removeBtn.setAttribute("aria-label", "Remove rule " + row.task);
+      removeBtn.setAttribute("aria-label", "Remove line " + String(row.lineIndex + 1) + ": " + row.task);
       actionsTd.appendChild(removeBtn);
       tr.appendChild(actionsTd);
 
