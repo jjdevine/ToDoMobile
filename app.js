@@ -17,7 +17,6 @@
   const TOAST_DISPLAY_MS = 4000;
   const SERVER_ERROR_TOAST_COOLDOWN_MS = 15000;
   const RECURRING_DESC_PREVIEW_MAX_LENGTH = 60;
-  const PROJECT_CONFIG_LINE_PATTERN = /^\s*(.+?)\s*-\s*(weekly|monthly|annual|daily|workdays|every\d+weeks|every\d+months)\s*-\s*(.+?)\s*$/i;
   const SUPABASE_PLACEHOLDER = "https://YOUR_PROJECT_REF.supabase.co";
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => document.querySelectorAll(selector);
@@ -3365,8 +3364,8 @@
       };
     }
 
-    const match = trimmed.match(PROJECT_CONFIG_LINE_PATTERN);
-    if (!match) {
+    const parsed = window.TaskPlannerCore.parseProjectConfigDetailed(trimmed);
+    if (parsed.errors.length || !parsed.rules.length) {
       return {
         lineIndex,
         task: trimmed,
@@ -3378,11 +3377,31 @@
 
     return {
       lineIndex,
-      task: match[1].trim(),
-      cadence: match[2].trim().toLowerCase(),
-      schedule: match[3].trim(),
+      task: parsed.rules[0].name,
+      cadence: parsed.rules[0].frequency,
+      schedule: formatConfigRuleSchedule(parsed.rules[0]),
       rowClassName: "",
     };
+  }
+
+  function formatConfigRuleSchedule(rule) {
+    if (!rule) return "";
+    if (rule.frequency === "daily") return "daily";
+    if (rule.frequency === "workdays") return "workdays";
+    if (rule.frequency === "weekly" || rule.frequency === "monthly") {
+      return rule.qualifiers.map((q) => String(q)).join(",");
+    }
+    if (rule.frequency === "annual") {
+      return rule.qualifiers
+        .map((q) => String(q.month).padStart(2, "0") + "-" + String(q.day).padStart(2, "0"))
+        .join(",");
+    }
+    if (/^every\d+(weeks|months)$/i.test(rule.frequency)) {
+      const q = rule.qualifiers[0];
+      if (!q) return "";
+      return String(q.year).padStart(4, "0") + "-" + String(q.month).padStart(2, "0") + "-" + String(q.day).padStart(2, "0");
+    }
+    return "";
   }
 
   function renderConfigRulesTable() {
