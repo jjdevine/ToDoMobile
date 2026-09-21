@@ -1303,6 +1303,90 @@ select {
   resize: vertical;
 }
 
+.config-rules-list-wrap {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.75rem;
+}
+
+.config-rules-list-header {
+  padding: 0.75rem 0.9rem 0.35rem;
+}
+
+.config-rules-list-header .task-builder-heading {
+  margin-bottom: 0;
+}
+
+.config-rules-empty {
+  margin: 0 0.9rem 0.75rem;
+  color: var(--text-muted);
+}
+
+.config-rules-table-wrap {
+  overflow-x: auto;
+}
+
+.config-rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.config-rules-table th,
+.config-rules-table td {
+  padding: 0.55rem 0.65rem;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.config-rules-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--surface);
+}
+
+.config-rules-table tbody th {
+  color: var(--text);
+  font-weight: 500;
+  background: transparent;
+}
+
+.config-rules-actions-col {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.config-rule-remove-btn {
+  width: auto;
+  min-width: 5.5rem;
+}
+
+.config-rule-comment td {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.config-rule-invalid td {
+  color: var(--danger);
+}
+
+.config-raw-editor {
+  margin-top: 0.55rem;
+}
+
+.config-raw-editor > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  margin-bottom: 0.55rem;
+}
+
+.config-raw-editor[open] > summary {
+  margin-bottom: 0.5rem;
+}
+
 .task-builder {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -1653,6 +1737,15 @@ select {
      task builder and action buttons) fits within a small viewport. */
   #config-modal-textarea {
     min-height: 6rem;
+  }
+
+  .config-rules-table {
+    font-size: 0.85rem;
+  }
+
+  .config-rule-remove-btn {
+    min-width: 4.5rem;
+    padding: 0.35rem 0.55rem;
   }
 
   .day-strip {

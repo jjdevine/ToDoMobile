@@ -3349,6 +3349,130 @@
     }
   }
 
+  function buildConfigLineDisplay(rawLine, lineIndex) {
+    const line = String(rawLine || "");
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith("#")) {
+      return {
+        lineIndex,
+        task: trimmed,
+        cadence: "Comment",
+        schedule: "—",
+        rowClassName: "config-rule-comment",
+      };
+    }
+
+    const parsed = window.TaskPlannerCore.parseProjectConfigDetailed(trimmed);
+    if (parsed.errors.length || !parsed.rules.length) {
+      return {
+        lineIndex,
+        task: trimmed,
+        cadence: "Invalid",
+        schedule: "Fix format before saving",
+        rowClassName: "config-rule-invalid",
+      };
+    }
+
+    return {
+      lineIndex,
+      task: parsed.rules[0].name,
+      cadence: parsed.rules[0].frequency,
+      schedule: formatConfigRuleSchedule(parsed.rules[0]),
+      rowClassName: "",
+    };
+  }
+
+  function formatConfigRuleSchedule(rule) {
+    if (!rule) return "";
+    if (rule.frequency === "daily") return "daily";
+    if (rule.frequency === "workdays") return "workdays";
+    if (rule.frequency === "weekly" || rule.frequency === "monthly") {
+      return rule.qualifiers.map((q) => String(q)).join(",");
+    }
+    if (rule.frequency === "annual") {
+      return rule.qualifiers
+        .map((q) => String(q.month).padStart(2, "0") + "-" + String(q.day).padStart(2, "0"))
+        .join(",");
+    }
+    if (/^every\d+(weeks|months)$/i.test(rule.frequency)) {
+      const q = rule.qualifiers[0];
+      if (!q) return "";
+      return String(q.year).padStart(4, "0") + "-" + String(q.month).padStart(2, "0") + "-" + String(q.day).padStart(2, "0");
+    }
+    return "";
+  }
+
+  function renderConfigRulesTable() {
+    const tableBody = $("#config-rules-table-body");
+    const emptyEl = $("#config-rules-empty");
+    const tableWrap = $("#config-rules-table-wrap");
+    const textarea = $("#config-modal-textarea");
+    if (!tableBody || !emptyEl || !tableWrap || !textarea) return;
+
+    const rows = String(textarea.value || "")
+      .split(/\r?\n/)
+      .map((line, lineIndex) => buildConfigLineDisplay(line, lineIndex))
+      .filter(Boolean);
+
+    tableBody.innerHTML = "";
+    emptyEl.classList.toggle("hidden", rows.length > 0);
+    tableWrap.classList.toggle("hidden", rows.length === 0);
+    tableWrap.setAttribute("aria-hidden", rows.length === 0 ? "true" : "false");
+
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      if (row.rowClassName) tr.className = row.rowClassName;
+
+      const taskTh = document.createElement("th");
+      taskTh.scope = "row";
+      taskTh.textContent = row.task;
+      tr.appendChild(taskTh);
+
+      const cadenceTd = document.createElement("td");
+      cadenceTd.textContent = row.cadence;
+      tr.appendChild(cadenceTd);
+
+      const scheduleTd = document.createElement("td");
+      scheduleTd.textContent = row.schedule;
+      tr.appendChild(scheduleTd);
+
+      const actionsTd = document.createElement("td");
+      actionsTd.setAttribute("headers", "config-rules-actions-header");
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn-secondary config-rule-remove-btn";
+      removeBtn.textContent = "Remove line " + String(row.lineIndex + 1);
+      removeBtn.setAttribute("data-line-index", String(row.lineIndex));
+      removeBtn.setAttribute("aria-label", "Remove line " + String(row.lineIndex + 1) + ": " + row.task);
+      actionsTd.appendChild(removeBtn);
+      tr.appendChild(actionsTd);
+
+      tableBody.appendChild(tr);
+    });
+  }
+
+  function handleConfigTextChanged() {
+    refreshRtdTaskNameDropdown();
+    renderConfigRulesTable();
+  }
+
+  function handleConfigRuleRemove(event) {
+    const button = event.target.closest(".config-rule-remove-btn");
+    if (!button) return;
+    const lineIndex = Number(button.getAttribute("data-line-index"));
+    if (isNaN(lineIndex) || lineIndex < 0) return;
+    const textarea = $("#config-modal-textarea");
+    if (!textarea) return;
+
+    const lines = String(textarea.value || "").split(/\r?\n/);
+    if (lineIndex >= lines.length) return;
+    lines.splice(lineIndex, 1);
+    textarea.value = lines.join("\n");
+    handleConfigTextChanged();
+  }
+
   function openConfigModal(projectId) {
     configModalProjectId = projectId;
     const textarea = $("#config-modal-textarea");
@@ -3366,7 +3490,7 @@
     if (rtdDescInput) rtdDescInput.value = "";
     const rtdErrorEl = $("#rtd-error");
     if (rtdErrorEl) { rtdErrorEl.textContent = ""; rtdErrorEl.classList.add("hidden"); }
-    refreshRtdTaskNameDropdown();
+    handleConfigTextChanged();
     renderRecurringTaskDescriptionsList(projectId);
     openModal("config-modal", "#builder-task-name");
   }
@@ -3522,7 +3646,7 @@
     if (textarea) {
       const existing = textarea.value;
       textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
-      refreshRtdTaskNameDropdown();
+      handleConfigTextChanged();
     }
 
     resetTaskBuilder();
@@ -3535,7 +3659,7 @@
     if (textarea) {
       const existing = textarea.value;
       textarea.value = existing ? existing.trimEnd() + "\n" + line : line;
-      refreshRtdTaskNameDropdown();
+      handleConfigTextChanged();
     }
     resetTaskBuilder();
     if (nameInput) nameInput.focus();
@@ -3550,7 +3674,7 @@
       const textarea = $("#config-modal-textarea");
       if (textarea) {
         textarea.value = text;
-        refreshRtdTaskNameDropdown();
+        handleConfigTextChanged();
       }
     };
     reader.readAsText(file);
@@ -4593,7 +4717,8 @@
     $("#config-form").addEventListener("submit", saveProjectConfig);
     $("#clear-config-btn").addEventListener("click", clearProjectConfig);
     $("#config-file-input").addEventListener("change", handleConfigFileUpload);
-    $("#config-modal-textarea").addEventListener("input", refreshRtdTaskNameDropdown);
+    $("#config-modal-textarea").addEventListener("input", handleConfigTextChanged);
+    $("#config-rules-table-body").addEventListener("click", handleConfigRuleRemove);
     document.querySelectorAll('input[name="builder-cadence"]').forEach((radio) => {
       radio.addEventListener("change", updateBuilderScheduleVisibility);
     });
