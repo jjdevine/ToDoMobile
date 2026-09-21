@@ -3425,9 +3425,10 @@
       const tr = document.createElement("tr");
       if (row.rowClassName) tr.className = row.rowClassName;
 
-      const taskTd = document.createElement("td");
-      taskTd.textContent = row.task;
-      tr.appendChild(taskTd);
+      const taskTh = document.createElement("th");
+      taskTh.scope = "row";
+      taskTh.textContent = row.task;
+      tr.appendChild(taskTh);
 
       const cadenceTd = document.createElement("td");
       cadenceTd.textContent = row.cadence;

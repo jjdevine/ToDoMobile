@@ -1341,10 +1341,16 @@ select {
   vertical-align: top;
 }
 
-.config-rules-table th {
+.config-rules-table thead th {
   color: var(--text-muted);
   font-weight: 600;
   background: var(--surface);
+}
+
+.config-rules-table tbody th {
+  color: var(--text);
+  font-weight: 500;
+  background: transparent;
 }
 
 .config-rules-actions-col {
